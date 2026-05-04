@@ -369,21 +369,71 @@ class App(ctk.CTk):
             self.status_label.configure(text="Nothing to analyze — refresh clusters first.")
             return
 
-        prompt = self._build_analysis_prompt()
         dlg = AnalysisDialog(self, title="Performance Analysis")
-        threading.Thread(target=self._run_analysis, args=(prompt, dlg), daemon=True).start()
+        dlg.set_text(
+            "Collecting cluster + node diagnostics from each reachable cluster…\n"
+            "This usually takes a few seconds.",
+            header="Gathering diagnostics",
+        )
+        threading.Thread(target=self._run_analysis, args=(dlg,), daemon=True).start()
 
-    def _run_analysis(self, prompt: str, dlg):
+    def _run_analysis(self, dlg):
+        import json
         from .ai_client import analyze, load_ai_settings
 
+        # 1. Collect diagnostics for every reachable cluster (in parallel).
+        diagnostics: dict[str, dict] = {}
+        threads = []
+        results: dict[str, dict] = {}
+        lock = threading.Lock()
+
+        def worker(status: ClusterStatus):
+            if not status.reachable:
+                with lock:
+                    results[status.config.name] = {
+                        "skipped": True,
+                        "reason": status.error_message or "unreachable",
+                    }
+                return
+            pwd = get_password(status.config.name) or ""
+            try:
+                diag = fetch_diagnostics(status.config, pwd)
+            except Exception as e:
+                diag = {"_error": str(e)}
+            with lock:
+                results[status.config.name] = diag
+
+        for st in self.cluster_statuses:
+            t = threading.Thread(target=worker, args=(st,), daemon=True)
+            t.start()
+            threads.append(t)
+        for t in threads:
+            t.join(timeout=30)
+        diagnostics = results
+
+        # 2. Update dialog so the user knows we're now talking to the model.
+        self.after(0, lambda: dlg.set_text(
+            "Diagnostics collected. Sending to model — this can take a few seconds…",
+            header="Analyzing",
+        ))
+
+        # 3. Build prompt (snapshot stats + diagnostics) and send.
+        prompt = self._build_analysis_prompt(diagnostics)
         try:
             reply = analyze(
                 prompt,
                 system=(
-                    "You are an Elasticsearch snapshot performance analyst. "
-                    "Given live snapshot stats from one or more clusters, identify "
-                    "bottlenecks, anomalies, and concrete tuning suggestions. "
-                    "Be concise and actionable. Use short headings and bullet lists."
+                    "You are an Elasticsearch snapshot + cluster performance analyst. "
+                    "You will receive live snapshot stats AND deeper cluster/node "
+                    "diagnostics (heap, GC, FS, CPU, thread pools, recoveries, "
+                    "shard state) for one or more clusters. Identify bottlenecks "
+                    "(saturated thread pools, high heap pressure, slow disks, hot "
+                    "nodes, repository/network throttling, unassigned shards), "
+                    "rank findings by impact, and propose concrete tuning steps "
+                    "(max_snapshot_bytes_per_sec, repository chunk size, "
+                    "concurrent_streams, snapshot/snapshot_meta pool sizing, "
+                    "indices.recovery.max_bytes_per_sec, instance/disk class, "
+                    "network MTU). Use short headings + bullet lists. Be concise."
                 ),
             )
         except Exception as e:
@@ -393,13 +443,14 @@ class App(ctk.CTk):
         model = load_ai_settings().model
         self.after(0, lambda: dlg.set_text(reply, header=f"Analysis ({model})"))
 
-    def _build_analysis_prompt(self) -> str:
+    def _build_analysis_prompt(self, diagnostics: dict | None = None) -> str:
+        import json
+        diagnostics = diagnostics or {}
         lines = [
-            "Analyze the following Elasticsearch snapshot stats. "
-            "Highlight slow clusters, stalled shards, throughput issues, "
-            "and suggest tuning (max_snapshot_bytes_per_sec, repository chunk size, "
-            "concurrent streams, network MTU, instance/disk class) where relevant. "
-            "Keep it under ~250 words.",
+            "Analyze the following Elasticsearch snapshot stats and cluster diagnostics. "
+            "Highlight slow clusters, stalled shards, throughput issues, heap/GC "
+            "pressure, saturated thread pools, and suggest concrete tuning. "
+            "Be concise — short headings + bullets.",
             "",
         ]
         for s in self.cluster_statuses:
@@ -440,6 +491,14 @@ class App(ctk.CTk):
                 lines.append(f"- slm_last: {s.slm_last_run}")
             if s.slm_next_run:
                 lines.append(f"- slm_next: {s.slm_next_run}")
+
+            diag = diagnostics.get(cfg.name)
+            if diag:
+                lines.append("- diagnostics:")
+                # Compact JSON keeps token count down vs. pretty-printed.
+                lines.append("```json")
+                lines.append(json.dumps(diag, separators=(",", ":"), default=str))
+                lines.append("```")
             lines.append("")
         return "\n".join(lines)
 
