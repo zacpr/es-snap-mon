@@ -85,6 +85,33 @@ def fetch_cluster_status(config: ClusterConfig, password: str) -> ClusterStatus:
         if resp.status_code == 200:
             data = resp.json()
             snapshots = data.get("snapshots", [])
+            # Fallback: if the configured repo has no current snapshot, ask
+            # the cluster for ALL currently-running snapshots (any repo). This
+            # handles cases where the active backup landed in a different
+            # repository than the one configured here.
+            if not snapshots:
+                try:
+                    all_resp = session.get(f"{base}/_snapshot/_status", timeout=20)
+                    if all_resp.status_code == 200:
+                        snapshots = all_resp.json().get("snapshots", []) or []
+                        if snapshots:
+                            # Use the running snapshot's actual repo for any
+                            # follow-up _status call below.
+                            running_repo = snapshots[0].get("repository")
+                            if running_repo and running_repo != config.snapshot_repo:
+                                # Stash so the rest of the code uses it.
+                                config_repo_for_status = running_repo
+                            else:
+                                config_repo_for_status = config.snapshot_repo
+                        else:
+                            config_repo_for_status = config.snapshot_repo
+                    else:
+                        config_repo_for_status = config.snapshot_repo
+                except Exception:
+                    config_repo_for_status = config.snapshot_repo
+            else:
+                config_repo_for_status = config.snapshot_repo
+
             if snapshots:
                 snap = snapshots[0]
                 status.snapshot_info = _parse_snapshot(snap)
@@ -96,7 +123,7 @@ def fetch_cluster_status(config: ClusterConfig, password: str) -> ClusterStatus:
                     try:
                         snap_name = status.snapshot_info.name
                         s_resp = session.get(
-                            f"{base}/_snapshot/{config.snapshot_repo}/{snap_name}/_status",
+                            f"{base}/_snapshot/{config_repo_for_status}/{snap_name}/_status",
                             timeout=20,
                         )
                         if s_resp.status_code == 200:
