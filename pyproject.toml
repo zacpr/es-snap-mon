@@ -1,0 +1,17 @@
+[project]
+name = "es-snap-mon"
+version = "0.1.0"
+description = "A sleek GUI for monitoring Elasticsearch snapshots"
+requires-python = ">=3.9"
+dependencies = [
+    "customtkinter>=5.2.0",
+    "requests>=2.31.0",
+    "keyring>=24.0.0",
+]
+
+[project.scripts]
+es-snap-mon = "es_snap_mon.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
