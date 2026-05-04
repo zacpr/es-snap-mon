@@ -1049,8 +1049,16 @@ class AnalysisScopeDialog:
     """Pick which clusters and which diagnostic sections to include."""
 
     def __init__(self, master, cluster_statuses, on_confirm):
+        from .ai_client import load_analysis_scope
+
         self.cluster_statuses = cluster_statuses
         self.on_confirm = on_confirm
+        self._estimate_after_id: str | None = None
+
+        saved = load_analysis_scope()
+        saved_clusters = set(saved.get("clusters") or [])
+        saved_sections = set(saved.get("sections") or [])
+        self._has_saved = bool(saved)
 
         self.dialog = tk.Toplevel(master)
         self.dialog.title("Analyze Performance — Scope")
@@ -1082,7 +1090,10 @@ class AnalysisScopeDialog:
         self.cluster_vars: dict[str, ctk.BooleanVar] = {}
         for st in cluster_statuses:
             name = st.config.name
-            default = st.reachable
+            if self._has_saved:
+                default = name in saved_clusters
+            else:
+                default = st.reachable
             var = ctk.BooleanVar(value=default)
             self.cluster_vars[name] = var
             label = name
@@ -1112,6 +1123,8 @@ class AnalysisScopeDialog:
         section_box.pack(fill="x", padx=12, pady=(0, 4))
         self.section_vars: dict[str, ctk.BooleanVar] = {}
         for key, label, default in DIAGNOSTIC_SECTIONS:
+            if self._has_saved:
+                default = key in saved_sections
             var = ctk.BooleanVar(value=default)
             self.section_vars[key] = var
             ctk.CTkCheckBox(section_box, text=label, variable=var).pack(anchor="w", padx=6, pady=2)
@@ -1148,28 +1161,50 @@ class AnalysisScopeDialog:
         self._BASE_PROMPT = 200
 
         self.estimate_label = ctk.CTkLabel(
-            btns, text="", font=ctk.CTkFont(size=11),
+            btns, text="Estimating…", font=ctk.CTkFont(size=11),
             text_color=("#666", "#94a3b8"),
         )
         self.estimate_label.pack(side="left")
 
         ctk.CTkButton(
-            btns, text="Cancel", width=90, fg_color="#555555",
+            btns, text="Cancel", width=80, fg_color="#555555",
             command=self.dialog.destroy,
         ).pack(side="right", padx=(6, 0))
         ctk.CTkButton(
-            btns, text="Analyze", width=110, command=self._confirm,
+            btns, text="Analyze", width=100, command=self._confirm,
+        ).pack(side="right", padx=(6, 0))
+        ctk.CTkButton(
+            btns, text="Save", width=80,
+            fg_color="transparent", border_width=1,
+            command=self._save_selection,
         ).pack(side="right")
 
-        # Hook all checkboxes to refresh the estimate.
+        # Hook all checkboxes to schedule a debounced estimate refresh.
         for v in list(self.cluster_vars.values()) + list(self.section_vars.values()):
-            v.trace_add("write", lambda *_: self._update_estimate())
+            v.trace_add("write", lambda *_: self._schedule_estimate())
+        # Compute the first estimate immediately so the user isn't staring at
+        # "Estimating…" while idle.
         self._update_estimate()
 
         self.dialog.lift()
         self.dialog.focus_force()
 
+    def _schedule_estimate(self):
+        # Show that an update is pending and recompute 2s after the user stops
+        # toggling checkboxes (debounce).
+        try:
+            self.estimate_label.configure(text="Estimating…")
+        except Exception:
+            pass
+        if self._estimate_after_id is not None:
+            try:
+                self.dialog.after_cancel(self._estimate_after_id)
+            except Exception:
+                pass
+        self._estimate_after_id = self.dialog.after(2000, self._update_estimate)
+
     def _update_estimate(self):
+        self._estimate_after_id = None
         n_clusters = sum(1 for v in self.cluster_vars.values() if v.get())
         sec_tokens = sum(
             self._SECTION_WEIGHTS.get(k, 0)
@@ -1180,6 +1215,17 @@ class AnalysisScopeDialog:
         self.estimate_label.configure(
             text=f"Estimate: ~{total:,} tokens  ({n_clusters} cluster(s))"
         )
+
+    def _save_selection(self):
+        from .ai_client import save_analysis_scope
+        clusters = sorted(n for n, v in self.cluster_vars.items() if v.get())
+        sections = sorted(k for k, v in self.section_vars.items() if v.get())
+        try:
+            save_analysis_scope(clusters, sections)
+            self.estimate_label.configure(text="✓ Saved")
+            self.dialog.after(1500, self._update_estimate)
+        except Exception as e:
+            self.estimate_label.configure(text=f"Save failed: {e}")
 
     def _confirm(self):
         clusters = {n for n, v in self.cluster_vars.items() if v.get()}

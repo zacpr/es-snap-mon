@@ -64,6 +64,37 @@ def set_ai_token(token: str) -> None:
     keyring.set_password(_APP_NAME, _AI_KEY, token)
 
 
+_SCOPE_FILE = "analysis_scope.json"
+
+
+def _scope_path():
+    return _config_dir() / _SCOPE_FILE
+
+
+def load_analysis_scope() -> dict:
+    """Returns {'clusters': [...], 'sections': [...]} or {} if none saved."""
+    p = _scope_path()
+    if not p.exists():
+        return {}
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return {}
+        return {
+            "clusters": list(data.get("clusters") or []),
+            "sections": list(data.get("sections") or []),
+        }
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def save_analysis_scope(clusters: list[str], sections: list[str]) -> None:
+    _scope_path().write_text(
+        json.dumps({"clusters": list(clusters), "sections": list(sections)}, indent=2),
+        encoding="utf-8",
+    )
+
+
 def analyze(prompt: str, system: str = "", timeout: int = 120) -> str:
     """Send a chat completion request and return the assistant's text."""
     settings = load_ai_settings()
