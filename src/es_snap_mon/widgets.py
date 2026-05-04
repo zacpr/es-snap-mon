@@ -671,3 +671,255 @@ class AddClusterDialog:
             self.on_save()
         finally:
             self.dialog.after(250, self.dialog.destroy)
+
+
+class AISettingsDialog:
+    """Configure the AI provider used by Performance Analysis."""
+
+    GITHUB_TOKEN_URL = (
+        "https://github.com/settings/tokens/new"
+        "?description=ES%20Snap%20Mon%20%E2%80%94%20AI%20Analysis"
+        "&scopes="
+    )
+
+    def __init__(self, master, on_save=None):
+        from .ai_client import load_ai_settings, get_ai_token
+
+        self.on_save = on_save
+        settings = load_ai_settings()
+
+        self.dialog = tk.Toplevel(master)
+        self.dialog.title("AI Settings")
+        self.dialog.geometry("600x540")
+        self.dialog.transient(master)
+        self.dialog.configure(bg="#2b2b2b")
+
+        frame = ctk.CTkFrame(self.dialog, corner_radius=0)
+        frame.pack(fill="both", expand=True)
+
+        # Sign-in panel for GitHub Models
+        signin = ctk.CTkFrame(frame, fg_color=("#e8f0ff", "#0f1f3a"), corner_radius=8)
+        signin.pack(fill="x", padx=20, pady=(16, 4))
+        ctk.CTkLabel(
+            signin,
+            text="Use GitHub Models (free, recommended)",
+            font=ctk.CTkFont(size=13, weight="bold"),
+        ).pack(anchor="w", padx=14, pady=(10, 2))
+        ctk.CTkLabel(
+            signin,
+            text=(
+                "1. Click ‘Get a Token’ — your browser opens GitHub's token page.\n"
+                "2. Click Generate token, copy it, paste below.\n"
+                "3. Click Verify — if it works, click Save."
+            ),
+            font=ctk.CTkFont(size=11),
+            text_color=("#444", "#94a3b8"),
+            justify="left",
+        ).pack(anchor="w", padx=14, pady=(0, 6))
+        signin_btns = ctk.CTkFrame(signin, fg_color="transparent")
+        signin_btns.pack(fill="x", padx=10, pady=(0, 10))
+        ctk.CTkButton(
+            signin_btns,
+            text="Get a Token  ↗",
+            width=130,
+            command=self._open_github_tokens,
+        ).pack(side="left", padx=(4, 6))
+        ctk.CTkButton(
+            signin_btns,
+            text="Paste from Clipboard",
+            width=160,
+            fg_color="transparent",
+            border_width=1,
+            command=self._paste_clipboard,
+        ).pack(side="left")
+
+        ctk.CTkLabel(
+            frame,
+            text="API Token",
+            font=ctk.CTkFont(weight="bold"),
+        ).pack(anchor="w", padx=20, pady=(14, 0))
+        token_row = ctk.CTkFrame(frame, fg_color="transparent")
+        token_row.pack(fill="x", padx=20, pady=(4, 0))
+        self.token_entry = ctk.CTkEntry(token_row, show="•", placeholder_text="ghp_… / sk-…")
+        self.token_entry.pack(side="left", fill="x", expand=True)
+        ctk.CTkButton(
+            token_row,
+            text="Verify",
+            width=80,
+            command=self._verify_token,
+        ).pack(side="left", padx=(8, 0))
+        existing = get_ai_token()
+        if existing:
+            self.token_entry.insert(0, existing)
+
+        # Advanced overrides — collapsed visually with a small label
+        ctk.CTkLabel(
+            frame,
+            text="Advanced (override provider / model)",
+            font=ctk.CTkFont(size=10, weight="bold"),
+            text_color=("#666", "#94a3b8"),
+        ).pack(anchor="w", padx=20, pady=(18, 0))
+
+        adv = ctk.CTkFrame(frame, fg_color="transparent")
+        adv.pack(fill="x", padx=20, pady=(4, 0))
+        adv.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(adv, text="Base URL", font=ctk.CTkFont(size=11)).grid(row=0, column=0, sticky="w", padx=(0, 8), pady=2)
+        self.base_entry = ctk.CTkEntry(adv)
+        self.base_entry.grid(row=0, column=1, sticky="ew", pady=2)
+        self.base_entry.insert(0, settings.base_url)
+        ctk.CTkLabel(adv, text="Model", font=ctk.CTkFont(size=11)).grid(row=1, column=0, sticky="w", padx=(0, 8), pady=2)
+        self.model_entry = ctk.CTkEntry(adv)
+        self.model_entry.grid(row=1, column=1, sticky="ew", pady=2)
+        self.model_entry.insert(0, settings.model)
+
+        self.status_label = ctk.CTkLabel(frame, text="", font=ctk.CTkFont(size=11))
+        self.status_label.pack(anchor="w", padx=20, pady=(10, 0))
+
+        btns = ctk.CTkFrame(frame, fg_color="transparent")
+        btns.pack(fill="x", padx=20, pady=(12, 16))
+        ctk.CTkButton(btns, text="Cancel", width=80, fg_color="#555555", command=self.dialog.destroy).pack(side="right", padx=(8, 0))
+        ctk.CTkButton(btns, text="Save", width=80, command=self._save).pack(side="right")
+
+        self.dialog.lift()
+        self.dialog.focus_force()
+        self.dialog.grab_set()
+
+    def _open_github_tokens(self):
+        import webbrowser
+        try:
+            webbrowser.open(self.GITHUB_TOKEN_URL, new=2)
+            self.status_label.configure(
+                text="Opened browser. Generate a token, copy it, then paste it below.",
+                text_color="#3498db",
+            )
+        except Exception as e:
+            self.status_label.configure(text=f"Could not open browser: {e}", text_color="#e74c3c")
+
+    def _paste_clipboard(self):
+        try:
+            text = self.dialog.clipboard_get().strip()
+        except tk.TclError:
+            self.status_label.configure(text="Clipboard is empty.", text_color="#e74c3c")
+            return
+        if not text:
+            self.status_label.configure(text="Clipboard is empty.", text_color="#e74c3c")
+            return
+        self.token_entry.delete(0, "end")
+        self.token_entry.insert(0, text)
+        self.status_label.configure(text="Token pasted from clipboard.", text_color="#3498db")
+
+    def _verify_token(self):
+        token = self.token_entry.get().strip()
+        base = self.base_entry.get().strip()
+        model = self.model_entry.get().strip()
+        if not token:
+            self.status_label.configure(text="Enter a token first.", text_color="#e74c3c")
+            return
+        self.status_label.configure(text="Verifying…", text_color="#3498db")
+        threading.Thread(
+            target=self._do_verify, args=(token, base, model), daemon=True
+        ).start()
+
+    def _do_verify(self, token: str, base: str, model: str):
+        from .ai_client import AISettings, save_ai_settings, set_ai_token, analyze, get_ai_token, load_ai_settings
+
+        # Stash existing values, set candidates temporarily, restore on failure.
+        prev_token = get_ai_token()
+        prev_settings = load_ai_settings()
+        try:
+            set_ai_token(token)
+            save_ai_settings(AISettings(base_url=base, model=model))
+            reply = analyze(
+                "Reply with the single word OK.",
+                system="You are a connectivity test. Reply with only: OK",
+                timeout=20,
+            )
+        except Exception as e:
+            # Restore previous
+            try:
+                if prev_token:
+                    set_ai_token(prev_token)
+                save_ai_settings(prev_settings)
+            except Exception:
+                pass
+            self.dialog.after(0, lambda: self.status_label.configure(
+                text=f"Verify failed: {e}", text_color="#e74c3c"
+            ))
+            return
+
+        ok_msg = f"Verified — {model} responded ({reply.strip()[:40]})"
+        self.dialog.after(0, lambda: self.status_label.configure(text=ok_msg, text_color="#2ecc71"))
+
+    def _save(self):
+        from .ai_client import AISettings, save_ai_settings, set_ai_token
+
+        token = self.token_entry.get().strip()
+        base = self.base_entry.get().strip()
+        model = self.model_entry.get().strip()
+        if not token:
+            self.status_label.configure(text="Token is required.", text_color="#e74c3c")
+            return
+        try:
+            set_ai_token(token)
+            save_ai_settings(AISettings(base_url=base, model=model))
+        except Exception as e:
+            self.status_label.configure(text=f"Save failed: {e}", text_color="#e74c3c")
+            return
+        if self.on_save:
+            self.on_save()
+        self.dialog.destroy()
+
+
+class AnalysisDialog:
+    """Display AI analysis output in a scrollable window."""
+
+    def __init__(self, master, title: str = "Performance Analysis"):
+        self.dialog = tk.Toplevel(master)
+        self.dialog.title(title)
+        self.dialog.geometry("780x600")
+        self.dialog.transient(master)
+        self.dialog.configure(bg="#2b2b2b")
+
+        outer = ctk.CTkFrame(self.dialog, corner_radius=0)
+        outer.pack(fill="both", expand=True)
+
+        self.header = ctk.CTkLabel(
+            outer,
+            text="Analyzing snapshot performance…",
+            font=ctk.CTkFont(size=14, weight="bold"),
+        )
+        self.header.pack(anchor="w", padx=18, pady=(14, 6))
+
+        self.textbox = ctk.CTkTextbox(outer, wrap="word", font=ctk.CTkFont(size=12))
+        self.textbox.pack(fill="both", expand=True, padx=14, pady=(0, 10))
+        self.textbox.insert("1.0", "Contacting model — this can take a few seconds…\n")
+        self.textbox.configure(state="disabled")
+
+        btns = ctk.CTkFrame(outer, fg_color="transparent")
+        btns.pack(fill="x", padx=14, pady=(0, 12))
+        self.copy_btn = ctk.CTkButton(btns, text="Copy", width=80, command=self._copy, state="disabled")
+        self.copy_btn.pack(side="left")
+        ctk.CTkButton(btns, text="Close", width=80, fg_color="#555555", command=self.dialog.destroy).pack(side="right")
+
+        self.dialog.lift()
+        self.dialog.focus_force()
+
+    def set_text(self, text: str, header: str | None = None):
+        if header is not None:
+            self.header.configure(text=header)
+        self.textbox.configure(state="normal")
+        self.textbox.delete("1.0", "end")
+        self.textbox.insert("1.0", text)
+        self.textbox.configure(state="disabled")
+        self.copy_btn.configure(state="normal")
+
+    def set_error(self, msg: str):
+        self.set_text(msg, header="Analysis failed")
+
+    def _copy(self):
+        try:
+            text = self.textbox.get("1.0", "end")
+            self.dialog.clipboard_clear()
+            self.dialog.clipboard_append(text)
+        except Exception:
+            pass

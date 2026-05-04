@@ -10,7 +10,7 @@ import customtkinter as ctk
 from .config_manager import load_clusters, remove_cluster, get_password, load_presets, toggle_ssl_verify
 from .es_client import fetch_cluster_status
 from .models import ClusterStatus
-from .widgets import ClusterCard, AddClusterDialog
+from .widgets import ClusterCard, AddClusterDialog, AISettingsDialog, AnalysisDialog
 
 class App(ctk.CTk):
     """Main application window."""
@@ -95,6 +95,25 @@ class App(ctk.CTk):
             command=self._load_presets_dialog,
         )
         self.presets_btn.grid(row=4, column=0, padx=20, pady=(0, 10), sticky="ew")
+
+        self.analyze_btn = ctk.CTkButton(
+            self.sidebar,
+            text="Analyze Performance",
+            fg_color="#7c3aed",
+            hover_color="#6d28d9",
+            command=self._analyze_performance,
+        )
+        self.analyze_btn.grid(row=6, column=0, padx=20, pady=(20, 6), sticky="ew")
+
+        self.ai_settings_btn = ctk.CTkButton(
+            self.sidebar,
+            text="AI Settings",
+            fg_color="transparent",
+            border_width=1,
+            text_color=("#666", "#94a3b8"),
+            command=self._open_ai_settings,
+        )
+        self.ai_settings_btn.grid(row=7, column=0, padx=20, pady=(0, 10), sticky="ew")
 
         self.auto_var = ctk.BooleanVar(value=True)
         ctk.CTkSwitch(
@@ -313,6 +332,95 @@ class App(ctk.CTk):
 
     def _open_edit_dialog(self, status: ClusterStatus):
         AddClusterDialog(self, on_save=self._trigger_refresh, existing=status)
+
+    def _open_ai_settings(self):
+        AISettingsDialog(self)
+
+    def _analyze_performance(self):
+        from .ai_client import get_ai_token
+
+        if not get_ai_token():
+            # No token yet — open settings first.
+            AISettingsDialog(self, on_save=self._analyze_performance)
+            return
+
+        if not self.cluster_statuses:
+            self.status_label.configure(text="Nothing to analyze — refresh clusters first.")
+            return
+
+        prompt = self._build_analysis_prompt()
+        dlg = AnalysisDialog(self, title="Performance Analysis")
+        threading.Thread(target=self._run_analysis, args=(prompt, dlg), daemon=True).start()
+
+    def _run_analysis(self, prompt: str, dlg):
+        from .ai_client import analyze, load_ai_settings
+
+        try:
+            reply = analyze(
+                prompt,
+                system=(
+                    "You are an Elasticsearch snapshot performance analyst. "
+                    "Given live snapshot stats from one or more clusters, identify "
+                    "bottlenecks, anomalies, and concrete tuning suggestions. "
+                    "Be concise and actionable. Use short headings and bullet lists."
+                ),
+            )
+        except Exception as e:
+            self.after(0, lambda: dlg.set_error(str(e)))
+            return
+
+        model = load_ai_settings().model
+        self.after(0, lambda: dlg.set_text(reply, header=f"Analysis ({model})"))
+
+    def _build_analysis_prompt(self) -> str:
+        lines = [
+            "Analyze the following Elasticsearch snapshot stats. "
+            "Highlight slow clusters, stalled shards, throughput issues, "
+            "and suggest tuning (max_snapshot_bytes_per_sec, repository chunk size, "
+            "concurrent streams, network MTU, instance/disk class) where relevant. "
+            "Keep it under ~250 words.",
+            "",
+        ]
+        for s in self.cluster_statuses:
+            cfg = s.config
+            lines.append(f"## Cluster: {cfg.name}")
+            lines.append(f"- host: {cfg.host}")
+            lines.append(f"- repo: {cfg.snapshot_repo}")
+            lines.append(f"- reachable: {s.reachable}")
+            if s.error_message:
+                lines.append(f"- error: {s.error_message}")
+            snap = s.snapshot_info
+            if snap:
+                lines.append(
+                    f"- snapshot: {snap.name}  state={snap.state.value}  "
+                    f"shards={snap.shards_successful}/{snap.shards_total} failed={snap.shards_failed}"
+                )
+                lines.append(f"- duration_ms: {snap.duration_ms}")
+            stats = s.snapshot_stats
+            if stats:
+                lines.append(
+                    f"- progress: {stats.progress_pct:.2f}%  "
+                    f"data: {stats.processed_human}/{stats.total_human}  "
+                    f"files: {stats.processed_files}/{stats.total_files}"
+                )
+                lines.append(
+                    f"- speed: cur={stats.current_speed_human} avg={stats.avg_speed_human} "
+                    f"window_avg_bps={stats.window_avg_speed_bps:.0f} "
+                    f"min_bps={stats.min_speed_bps:.0f} max_bps={stats.max_speed_bps:.0f}"
+                )
+                lines.append(
+                    f"- shard_rate: cur={stats.current_shard_rate:.3f}/s "
+                    f"avg={stats.avg_shard_rate:.3f}/s "
+                    f"window_avg={stats.window_avg_shard_rate:.3f}/s"
+                )
+                if stats.eta_human and stats.eta_human != "—":
+                    lines.append(f"- eta: {stats.eta_human}  completion: {stats.completion_human or '—'}")
+            if s.slm_last_run:
+                lines.append(f"- slm_last: {s.slm_last_run}")
+            if s.slm_next_run:
+                lines.append(f"- slm_next: {s.slm_next_run}")
+            lines.append("")
+        return "\n".join(lines)
 
     def _do_toggle_ssl(self, name: str):
         new_val = toggle_ssl_verify(name)
