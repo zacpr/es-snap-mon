@@ -780,11 +780,9 @@ class AddClusterDialog:
 class AISettingsDialog:
     """Configure the AI provider used by Performance Analysis."""
 
-    GITHUB_TOKEN_URL = (
-        "https://github.com/settings/tokens/new"
-        "?description=ES%20Snap%20Mon%20%E2%80%94%20AI%20Analysis"
-        "&scopes="
-    )
+    # Fine-grained personal access tokens (new style). The GitHub Models API
+    # accepts these and they're scoped/expiring by default.
+    GITHUB_TOKEN_URL = "https://github.com/settings/personal-access-tokens/new"
 
     def __init__(self, master, on_save=None):
         from .ai_client import load_ai_settings, get_ai_token
@@ -812,9 +810,10 @@ class AISettingsDialog:
         ctk.CTkLabel(
             signin,
             text=(
-                "1. Click ‘Get a Token’ — your browser opens GitHub's token page.\n"
-                "2. Click Generate token, copy it, paste below.\n"
-                "3. Click Verify — if it works, click Save."
+                "1. Click ‘Get a Token’ — opens GitHub's fine-grained token page.\n"
+                "2. Token name: ‘ES Snap Mon — AI Analysis’.  Resource owner: your account.\n"
+                "3. Permissions → Account permissions → ‘Models’ = Read-only.\n"
+                "4. Generate, copy, paste below, click Verify, then Save."
             ),
             font=ctk.CTkFont(size=11),
             text_color=("#444", "#94a3b8"),
