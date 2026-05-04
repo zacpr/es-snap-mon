@@ -27,3 +27,7 @@ Thumbs.db
 config/local.json
 *.log
 clusters.json
+
+# Root-level CA used during dev — the canonical bundled copy lives at
+# src/es_snap_mon/data/ca.pem
+/ca.pem

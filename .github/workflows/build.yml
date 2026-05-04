@@ -32,6 +32,7 @@ jobs:
           pyinstaller --noconfirm --windowed --name "ESSnapMon" `
             --collect-all customtkinter `
             --collect-submodules keyring.backends `
+            --add-data "src/es_snap_mon/data/ca.pem;es_snap_mon/data" `
             src/es_snap_mon/__main__.py
 
       - name: Install Inno Setup
@@ -75,6 +76,7 @@ jobs:
           pyinstaller --noconfirm --name es-snap-mon \
             --collect-all customtkinter \
             --collect-submodules keyring.backends \
+            --add-data "src/es_snap_mon/data/ca.pem:es_snap_mon/data" \
             src/es_snap_mon/__main__.py
 
       - name: Stage payload

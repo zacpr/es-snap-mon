@@ -1,8 +1,10 @@
 """Elasticsearch API client for snapshot monitoring."""
 from __future__ import annotations
 
+import sys
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional, Union
 
 import requests
@@ -17,12 +19,43 @@ from .models import (
 )
 
 
+def _resolve_verify(config: ClusterConfig):
+    """Resolve the `verify` parameter for requests.
+
+    Returns:
+        - `False` if SSL verification is disabled.
+        - A path string when a custom CA bundle is configured (or the
+          bundled cert is requested via `ca_cert == "bundled"`).
+        - `True` for default system CA verification.
+    """
+    if not config.verify_ssl:
+        return False
+    ca = config.ca_cert
+    if ca:
+        if ca == "bundled":
+            bundled = _bundled_ca_path()
+            if bundled and bundled.exists():
+                return str(bundled)
+        elif Path(ca).exists():
+            return ca
+    return True
+
+
+def _bundled_ca_path() -> Optional[Path]:
+    """Locate the bundled ca.pem in both source and PyInstaller-frozen runs."""
+    # PyInstaller extracts data files to sys._MEIPASS at runtime
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        return Path(meipass) / "es_snap_mon" / "data" / "ca.pem"
+    return Path(__file__).parent / "data" / "ca.pem"
+
+
 def fetch_cluster_status(config: ClusterConfig, password: str) -> ClusterStatus:
     """Fetch full status for a single cluster."""
     status = ClusterStatus(config=config)
     session = requests.Session()
     session.auth = HTTPBasicAuth(config.username, password)
-    session.verify = config.verify_ssl
+    session.verify = _resolve_verify(config)
     base = config.host.rstrip("/")
 
     # 1. Health check

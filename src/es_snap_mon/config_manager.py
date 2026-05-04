@@ -21,6 +21,7 @@ DEFAULT_PRESETS = [
         slm_policy="slm_apac-prod-1-qid-full-backup-to-s3",
         username="elastic",
         verify_ssl=True,
+        ca_cert="bundled",
     ),
     ClusterConfig(
         name="AMER Production",
@@ -29,6 +30,7 @@ DEFAULT_PRESETS = [
         slm_policy="slm_amer-prod-1-qid-full-backup-to-s3",
         username="elastic",
         verify_ssl=True,
+        ca_cert="bundled",
     ),
     ClusterConfig(
         name="EMEA Production",
@@ -37,6 +39,7 @@ DEFAULT_PRESETS = [
         slm_policy="slm_emea-prod-1-qid-full-backup-to-s3",
         username="elastic",
         verify_ssl=True,
+        ca_cert="bundled",
     ),
 ]
 
@@ -84,6 +87,7 @@ def load_clusters() -> List[ClusterConfig]:
                     slm_policy=item["slm_policy"],
                     username=item["username"],
                     verify_ssl=bool(item.get("verify_ssl", True)),
+                    ca_cert=item.get("ca_cert"),
                 )
             )
         except KeyError:
@@ -101,6 +105,7 @@ def save_clusters(clusters: List[ClusterConfig]) -> None:
             "slm_policy": c.slm_policy,
             "username": c.username,
             "verify_ssl": bool(c.verify_ssl),
+            "ca_cert": c.ca_cert,
         }
         for c in clusters
     ]
@@ -168,5 +173,6 @@ def load_presets(password: str = "", verify_ssl: bool = True) -> None:
             slm_policy=preset.slm_policy,
             username=preset.username,
             verify_ssl=verify_ssl,
+            ca_cert=preset.ca_cert,
         )
         save_cluster(cfg, password)

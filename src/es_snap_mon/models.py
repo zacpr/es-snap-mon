@@ -28,6 +28,10 @@ class ClusterConfig:
     slm_policy: str
     username: str
     verify_ssl: bool = True
+    # Optional CA bundle path. When set, used instead of `verify_ssl=True`
+    # to validate the cluster's TLS certificate against a custom CA.
+    # Special value "bundled" means "use the CA shipped inside this package".
+    ca_cert: Optional[str] = None
 
 
 @dataclass
