@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import random
 import subprocess
 import sys
 import threading
@@ -278,6 +279,150 @@ class MiniSparkline(ctk.CTkFrame):
         return f"{bps:.0f} B/s"
 
 
+class ParallaxStrip(ctk.CTkFrame):
+    """Tiny animated scenery strip to add motion above the sparkline."""
+
+    def __init__(self, master, height: int = 30, pace: float = 1.0, **kwargs):
+        super().__init__(master, height=height, **kwargs)
+        self._h = height
+        self._pace = max(0.6, min(pace, 2.2))
+        self._running = True
+        self._after_id = None
+        self._sprites: list[dict] = []
+
+        self._canvas = tk.Canvas(
+            self,
+            height=height,
+            highlightthickness=0,
+            bg="#12263d",
+        )
+        self._canvas.pack(fill="x", expand=True)
+        self.bind("<Configure>", lambda e: self._draw_static())
+        self.bind("<Destroy>", self._on_destroy)
+
+        # Seed a few moving silhouettes in two layers.
+        for _ in range(4):
+            self._sprites.append(self._new_sprite(layer=0, seed_x=None))
+        for _ in range(3):
+            self._sprites.append(self._new_sprite(layer=1, seed_x=None))
+
+        self.after(80, self._start)
+
+    def _on_destroy(self, _event=None):
+        self._running = False
+        if self._after_id is not None:
+            try:
+                self.after_cancel(self._after_id)
+            except Exception:
+                pass
+            self._after_id = None
+
+    def _start(self):
+        self._draw_static()
+        self._tick()
+
+    def _draw_static(self):
+        w = self._canvas.winfo_width()
+        if w < 10:
+            return
+        h = self._h
+        self._canvas.delete("bg")
+
+        # Distant hills
+        self._canvas.create_polygon(
+            0, h,
+            w * 0.10, h * 0.48,
+            w * 0.22, h * 0.62,
+            w * 0.34, h * 0.42,
+            w * 0.46, h * 0.58,
+            w * 0.61, h * 0.40,
+            w * 0.78, h * 0.66,
+            w * 0.90, h * 0.52,
+            w, h,
+            fill="#1f3f61",
+            outline="",
+            tags="bg",
+        )
+        # Nearer ridge
+        self._canvas.create_polygon(
+            0, h,
+            w * 0.12, h * 0.70,
+            w * 0.28, h * 0.56,
+            w * 0.40, h * 0.76,
+            w * 0.55, h * 0.60,
+            w * 0.72, h * 0.80,
+            w * 0.86, h * 0.64,
+            w, h,
+            fill="#173552",
+            outline="",
+            tags="bg",
+        )
+
+    def _new_sprite(self, layer: int, seed_x: float | None):
+        w = max(200, self._canvas.winfo_width())
+        x = seed_x if seed_x is not None else random.uniform(0, w)
+        # Two depth layers: near layer is faster/lower/bigger.
+        if layer == 0:
+            y = self._h - random.uniform(5, 9)
+            speed = random.uniform(0.5, 0.9) * self._pace
+            scale = random.uniform(0.8, 1.1)
+            color = "#0d1c2c"
+        else:
+            y = self._h - random.uniform(9, 14)
+            speed = random.uniform(0.25, 0.5) * self._pace
+            scale = random.uniform(0.65, 0.95)
+            color = "#102338"
+        kind = random.choice(["tree", "tree", "deer", "deer", "boar"])
+        return {"x": x, "y": y, "speed": speed, "scale": scale, "kind": kind, "color": color}
+
+    def _draw_tree(self, x: float, y: float, s: float, color: str):
+        self._canvas.create_polygon(
+            x, y - 10 * s,
+            x - 4 * s, y - 3 * s,
+            x + 4 * s, y - 3 * s,
+            fill=color, outline="", tags="sprite",
+        )
+        self._canvas.create_rectangle(
+            x - 0.8 * s, y - 3 * s, x + 0.8 * s, y,
+            fill=color, outline="", tags="sprite",
+        )
+
+    def _draw_deer(self, x: float, y: float, s: float, color: str):
+        self._canvas.create_oval(x - 4 * s, y - 5 * s, x + 3 * s, y - 1 * s, fill=color, outline="", tags="sprite")
+        self._canvas.create_oval(x + 2.5 * s, y - 5.2 * s, x + 5 * s, y - 3.3 * s, fill=color, outline="", tags="sprite")
+        for lx in (-2.8, -1.2, 0.6, 2.0):
+            self._canvas.create_line(x + lx * s, y - 1.5 * s, x + lx * s, y, fill=color, width=max(1, int(s)), tags="sprite")
+
+    def _draw_boar(self, x: float, y: float, s: float, color: str):
+        self._canvas.create_oval(x - 4.5 * s, y - 4.2 * s, x + 4 * s, y - 1 * s, fill=color, outline="", tags="sprite")
+        self._canvas.create_oval(x + 3.2 * s, y - 3.7 * s, x + 5.4 * s, y - 2.0 * s, fill=color, outline="", tags="sprite")
+        for lx in (-2.5, -0.8, 0.9, 2.4):
+            self._canvas.create_line(x + lx * s, y - 1.2 * s, x + lx * s, y, fill=color, width=max(1, int(s)), tags="sprite")
+
+    def _tick(self):
+        if not self._running or not self.winfo_exists():
+            return
+        w = self._canvas.winfo_width()
+        if w < 10:
+            self._after_id = self.after(120, self._tick)
+            return
+
+        self._canvas.delete("sprite")
+        for sp in self._sprites:
+            sp["x"] -= sp["speed"]
+            if sp["x"] < -24:
+                sp.update(self._new_sprite(layer=0 if sp["speed"] > 0.6 else 1, seed_x=w + random.uniform(4, 80)))
+
+            if sp["kind"] == "tree":
+                self._draw_tree(sp["x"], sp["y"], sp["scale"], sp["color"])
+            elif sp["kind"] == "deer":
+                self._draw_deer(sp["x"], sp["y"], sp["scale"], sp["color"])
+            else:
+                self._draw_boar(sp["x"], sp["y"], sp["scale"], sp["color"])
+
+        self._after_id = self.after(90, self._tick)
+
+
 class ClusterCard(ctk.CTkFrame):
     """A dashboard card showing status for a single cluster."""
 
@@ -290,19 +435,31 @@ class ClusterCard(ctk.CTkFrame):
         SnapshotState.WAITING: ("#9b59b6", "#8e44ad"),
     }
 
-    def __init__(self, master, status: ClusterStatus, speed_history=None, on_remove=None, on_edit=None, on_toggle_ssl=None):
+    def __init__(
+        self,
+        master,
+        status: ClusterStatus,
+        speed_history=None,
+        scenic_mode: bool = True,
+        on_remove=None,
+        on_edit=None,
+        on_toggle_ssl=None,
+    ):
         super().__init__(master, corner_radius=12, fg_color=("#f0f0f0", "#1e293b"))
         self.status = status
         self.speed_history = speed_history or []
+        self.scenic_mode = scenic_mode
         self.on_remove = on_remove
         self.on_edit = on_edit
         self.on_toggle_ssl = on_toggle_ssl
         self._build()
 
-    def refresh(self, status: ClusterStatus, speed_history=None):
+    def refresh(self, status: ClusterStatus, speed_history=None, scenic_mode: bool | None = None):
         """Update this card in-place with new data, no card-frame churn."""
         self.status = status
         self.speed_history = speed_history or []
+        if scenic_mode is not None:
+            self.scenic_mode = scenic_mode
         for child in self.winfo_children():
             child.destroy()
         self._build()
@@ -492,6 +649,14 @@ class ClusterCard(ctk.CTkFrame):
             if self.speed_history and len(self.speed_history) >= 1:
                 graph_frame = ctk.CTkFrame(self, fg_color="transparent")
                 graph_frame.pack(fill="x", padx=18, pady=(2, 4))
+                if self.scenic_mode:
+                    # Scenic parallax strip (trees + animals) to create a
+                    # subtle "passing train / mountain range" vibe without
+                    # obscuring data.
+                    pace = 1.0
+                    if stats and getattr(stats, "window_avg_speed_bps", 0) > 0:
+                        pace = min(2.0, 0.9 + (stats.window_avg_speed_bps / (140 * 1024 * 1024)))
+                    ParallaxStrip(graph_frame, height=30, pace=pace).pack(fill="x", pady=(0, 2))
                 MiniSparkline(graph_frame, data=self.speed_history, height=50).pack(fill="x")
 
             # Stats grid

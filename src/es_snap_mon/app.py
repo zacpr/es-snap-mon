@@ -57,6 +57,7 @@ class App(ctk.CTk):
         self._refresh_timer = None
         self._auto_refresh = True
         self._refreshing = False
+        self._scenic_mode = True
         self._last_poll: dict[str, tuple[float, int, int]] = {}  # (time, bytes, shards)
         self._speed_history: dict[str, list[tuple[float, float]]] = {}  # name -> [(time, bps), ...]
         self._shard_rate_history: dict[str, list[tuple[float, float]]] = {}  # name -> [(time, shards/sec), ...]
@@ -124,7 +125,7 @@ class App(ctk.CTk):
             hover_color="#6d28d9",
             command=self._analyze_performance,
         )
-        self.analyze_btn.grid(row=6, column=0, padx=20, pady=(20, 6), sticky="ew")
+        self.analyze_btn.grid(row=7, column=0, padx=20, pady=(20, 6), sticky="ew")
 
         self.ai_settings_btn = ctk.CTkButton(
             self.sidebar,
@@ -134,7 +135,7 @@ class App(ctk.CTk):
             text_color=("#666", "#94a3b8"),
             command=self._open_ai_settings,
         )
-        self.ai_settings_btn.grid(row=7, column=0, padx=20, pady=(0, 10), sticky="ew")
+        self.ai_settings_btn.grid(row=8, column=0, padx=20, pady=(0, 10), sticky="ew")
 
         self.auto_var = ctk.BooleanVar(value=True)
         ctk.CTkSwitch(
@@ -143,6 +144,14 @@ class App(ctk.CTk):
             variable=self.auto_var,
             command=self._toggle_auto_refresh,
         ).grid(row=5, column=0, padx=20, pady=(10, 0), sticky="nw")
+
+        self.scenic_var = ctk.BooleanVar(value=True)
+        ctk.CTkSwitch(
+            self.sidebar,
+            text="Scenic Motion",
+            variable=self.scenic_var,
+            command=self._toggle_scenic_mode,
+        ).grid(row=6, column=0, padx=20, pady=(8, 0), sticky="nw")
 
         # Main content
         self.content = ctk.CTkFrame(self, corner_radius=0)
@@ -198,6 +207,10 @@ class App(ctk.CTk):
             self._schedule_refresh(self.REFRESH_INTERVAL)
         else:
             self._cancel_refresh()
+
+    def _toggle_scenic_mode(self):
+        self._scenic_mode = self.scenic_var.get()
+        self._render_cards()
 
     def _schedule_refresh(self, delay: float):
         self._cancel_refresh()
@@ -337,6 +350,7 @@ class App(ctk.CTk):
                     self.scroll,
                     status=status,
                     speed_history=history,
+                    scenic_mode=self._scenic_mode,
                     on_remove=lambda n=name: self._confirm_remove(n),
                     on_edit=lambda s=status: self._open_edit_dialog(s),
                 )
@@ -345,7 +359,7 @@ class App(ctk.CTk):
                 # Keep callbacks bound to the latest status object
                 card.on_edit = lambda s=status: self._open_edit_dialog(s)
                 card.on_remove = lambda n=name: self._confirm_remove(n)
-                card.refresh(status, history)
+                card.refresh(status, history, scenic_mode=self._scenic_mode)
             card.grid(row=i, column=0, sticky="ew", padx=8, pady=6)
 
         # Remove cards for clusters that no longer exist
