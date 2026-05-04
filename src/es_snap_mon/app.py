@@ -57,7 +57,7 @@ class App(ctk.CTk):
         self._refresh_timer = None
         self._auto_refresh = True
         self._refreshing = False
-        self._scenic_mode = True
+        self._scenic_mode = False
         self._parallax_test_mode = "auto"  # auto | normal | stampede
         self._parallax_intensity = 1.0  # 0.75 calm | 1.0 normal | 1.35 wild
         self._last_poll: dict[str, tuple[float, int, int]] = {}  # (time, bytes, shards)
@@ -151,7 +151,7 @@ class App(ctk.CTk):
             command=self._toggle_auto_refresh,
         ).grid(row=5, column=0, padx=20, pady=(10, 0), sticky="nw")
 
-        self.scenic_var = ctk.BooleanVar(value=True)
+        self.scenic_var = ctk.BooleanVar(value=False)
         ctk.CTkSwitch(
             self.sidebar,
             text="Scenic Motion",
