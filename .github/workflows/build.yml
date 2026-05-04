@@ -30,12 +30,14 @@ jobs:
         shell: pwsh
         run: |
           pyinstaller --noconfirm --windowed --name "ESSnapMon" `
+            --icon src/es_snap_mon/data/icon.ico `
             --hidden-import es_snap_mon `
             --hidden-import es_snap_mon.app `
             --hidden-import es_snap_mon.widgets `
             --hidden-import es_snap_mon.es_client `
             --hidden-import es_snap_mon.config_manager `
             --hidden-import es_snap_mon.models `
+            --hidden-import es_snap_mon.ai_client `
             --collect-all es_snap_mon `
             --collect-all customtkinter `
             --collect-submodules keyring.backends `
@@ -80,12 +82,14 @@ jobs:
       - name: Build with PyInstaller
         run: |
           pyinstaller --noconfirm --name es-snap-mon \
+            --icon src/es_snap_mon/data/icon.png \
             --hidden-import es_snap_mon \
             --hidden-import es_snap_mon.app \
             --hidden-import es_snap_mon.widgets \
             --hidden-import es_snap_mon.es_client \
             --hidden-import es_snap_mon.config_manager \
             --hidden-import es_snap_mon.models \
+            --hidden-import es_snap_mon.ai_client \
             --collect-all es_snap_mon \
             --collect-all customtkinter \
             --collect-submodules keyring.backends \
@@ -99,6 +103,13 @@ jobs:
           ln -s /opt/es-snap-mon/es-snap-mon staging/usr/bin/es-snap-mon
           mkdir -p staging/usr/share/applications
           cp packaging/linux/es-snap-mon.desktop staging/usr/share/applications/
+          for size in 32 48 64 128 256; do
+            mkdir -p "staging/usr/share/icons/hicolor/${size}x${size}/apps"
+          done
+          cp src/es_snap_mon/data/icon-32.png  staging/usr/share/icons/hicolor/32x32/apps/es-snap-mon.png
+          cp src/es_snap_mon/data/icon-48.png  staging/usr/share/icons/hicolor/48x48/apps/es-snap-mon.png
+          cp src/es_snap_mon/data/icon-64.png  staging/usr/share/icons/hicolor/64x64/apps/es-snap-mon.png
+          cp src/es_snap_mon/data/icon.png     staging/usr/share/icons/hicolor/256x256/apps/es-snap-mon.png
 
       - name: Read version
         id: ver

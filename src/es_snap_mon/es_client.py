@@ -265,3 +265,154 @@ def _format_es_time(value: Union[str, int, None]) -> Optional[str]:
         return dt.astimezone().strftime("%b %d, %Y %I:%M %p")  # e.g. "Jan 15, 2024 10:30 AM"
     except Exception:
         return str(value)
+
+
+def fetch_diagnostics(config: ClusterConfig, password: str) -> dict:
+    """Collect compact cluster + node stats useful for performance diagnosis.
+
+    Returns a dict (or {'error': ...}) suitable for serializing into an
+    LLM prompt. Each section is best-effort: any single failing call is
+    captured in its own 'error' field instead of aborting the whole call.
+    """
+    out: dict = {"host": config.host, "name": config.name}
+    session = requests.Session()
+    session.auth = HTTPBasicAuth(config.username, password)
+    session.verify = _resolve_verify(config)
+    base = config.host.rstrip("/")
+
+    def _get(path: str, timeout: int = 15):
+        try:
+            r = session.get(f"{base}{path}", timeout=timeout)
+            if r.status_code != 200:
+                return {"_status": r.status_code, "_body": r.text[:300]}
+            return r.json()
+        except Exception as e:
+            return {"_error": str(e)[:300]}
+
+    # 1. Cluster health
+    health = _get("/_cluster/health")
+    if isinstance(health, dict) and "_error" not in health and "_status" not in health:
+        out["health"] = {
+            k: health.get(k)
+            for k in (
+                "status",
+                "number_of_nodes",
+                "number_of_data_nodes",
+                "active_primary_shards",
+                "active_shards",
+                "relocating_shards",
+                "initializing_shards",
+                "unassigned_shards",
+                "delayed_unassigned_shards",
+                "active_shards_percent_as_number",
+                "task_max_waiting_in_queue_millis",
+            )
+        }
+    else:
+        out["health"] = health
+
+    # 2. Pending tasks (top of the queue, if any)
+    pending = _get("/_cluster/pending_tasks")
+    if isinstance(pending, dict):
+        tasks = pending.get("tasks", [])
+        out["pending_tasks_count"] = len(tasks)
+        out["pending_tasks_top"] = [
+            {k: t.get(k) for k in ("priority", "source", "time_in_queue_millis")}
+            for t in tasks[:5]
+        ]
+
+    # 3. Per-node stats (jvm + fs + os.load + indices.store), trimmed
+    nstats = _get("/_nodes/stats/jvm,fs,os,indices,thread_pool?human=false", timeout=20)
+    if isinstance(nstats, dict) and "nodes" in nstats:
+        nodes_out = []
+        for nid, n in (nstats.get("nodes") or {}).items():
+            jvm_mem = (n.get("jvm") or {}).get("mem", {})
+            jvm_gc = ((n.get("jvm") or {}).get("gc") or {}).get("collectors", {})
+            old_gc = jvm_gc.get("old", {})
+            young_gc = jvm_gc.get("young", {})
+            fs_total = (n.get("fs") or {}).get("total", {})
+            os_info = n.get("os") or {}
+            cpu = (os_info.get("cpu") or {})
+            indices = n.get("indices") or {}
+            store = indices.get("store") or {}
+            tps = n.get("thread_pool") or {}
+            tp_summary = {}
+            for pool in ("snapshot", "snapshot_meta", "write", "search", "generic"):
+                p = tps.get(pool) or {}
+                tp_summary[pool] = {
+                    "active": p.get("active"),
+                    "queue": p.get("queue"),
+                    "rejected": p.get("rejected"),
+                }
+            nodes_out.append({
+                "name": n.get("name"),
+                "roles": n.get("roles"),
+                "host": n.get("host") or n.get("ip"),
+                "jvm_heap_used_pct": jvm_mem.get("heap_used_percent"),
+                "jvm_heap_used_bytes": jvm_mem.get("heap_used_in_bytes"),
+                "jvm_heap_max_bytes": jvm_mem.get("heap_max_in_bytes"),
+                "gc_old_count": old_gc.get("collection_count"),
+                "gc_old_ms": old_gc.get("collection_time_in_millis"),
+                "gc_young_count": young_gc.get("collection_count"),
+                "gc_young_ms": young_gc.get("collection_time_in_millis"),
+                "fs_total_bytes": fs_total.get("total_in_bytes"),
+                "fs_free_bytes": fs_total.get("free_in_bytes"),
+                "fs_available_bytes": fs_total.get("available_in_bytes"),
+                "cpu_pct": cpu.get("percent"),
+                "load_avg": (os_info.get("cpu") or {}).get("load_average"),
+                "indices_store_bytes": store.get("size_in_bytes"),
+                "thread_pools": tp_summary,
+            })
+        out["nodes"] = nodes_out
+    else:
+        out["nodes"] = nstats
+
+    # 4. Snapshot repository details + verification
+    repo = _get(f"/_snapshot/{config.snapshot_repo}")
+    if isinstance(repo, dict):
+        rd = (repo.get(config.snapshot_repo) or {})
+        out["repository"] = {
+            "type": rd.get("type"),
+            "settings": rd.get("settings"),
+        }
+
+    # 5. Recovery state for any moving shards
+    rec = _get("/_recovery?active_only=true")
+    if isinstance(rec, dict):
+        active = []
+        for idx, payload in rec.items():
+            shards = payload.get("shards") or []
+            for s in shards:
+                if s.get("stage") in ("DONE", None):
+                    continue
+                src = (s.get("source") or {}).get("host")
+                tgt = (s.get("target") or {}).get("host")
+                idx_stats = (s.get("index") or {}).get("size") or {}
+                active.append({
+                    "index": idx,
+                    "shard": s.get("id"),
+                    "type": s.get("type"),
+                    "stage": s.get("stage"),
+                    "source": src,
+                    "target": tgt,
+                    "total_bytes": idx_stats.get("total_in_bytes"),
+                    "recovered_bytes": idx_stats.get("recovered_in_bytes"),
+                    "percent": idx_stats.get("percent"),
+                })
+        out["active_recoveries"] = active[:25]
+        out["active_recovery_count"] = len(active)
+
+    # 6. Shard allocation summary (counts only — full output is huge)
+    cat_shards = _get("/_cat/shards?format=json&h=index,shard,prirep,state,node&bytes=b")
+    if isinstance(cat_shards, list):
+        by_state: dict[str, int] = {}
+        unassigned = []
+        for sh in cat_shards:
+            st = sh.get("state") or "UNKNOWN"
+            by_state[st] = by_state.get(st, 0) + 1
+            if st == "UNASSIGNED" and len(unassigned) < 10:
+                unassigned.append({k: sh.get(k) for k in ("index", "shard", "prirep")})
+        out["shard_state_counts"] = by_state
+        out["unassigned_examples"] = unassigned
+
+    return out

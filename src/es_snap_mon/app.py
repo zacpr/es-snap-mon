@@ -8,9 +8,20 @@ from typing import List
 import customtkinter as ctk
 
 from .config_manager import load_clusters, remove_cluster, get_password, load_presets, toggle_ssl_verify
-from .es_client import fetch_cluster_status
+from .es_client import fetch_cluster_status, fetch_diagnostics
 from .models import ClusterStatus
 from .widgets import ClusterCard, AddClusterDialog, AISettingsDialog, AnalysisDialog
+
+
+def _icon_path() -> str | None:
+    """Return absolute path to the bundled app icon, or None if missing."""
+    import os, sys
+    base = getattr(sys, "_MEIPASS", None)
+    if base:
+        candidate = os.path.join(base, "es_snap_mon", "data", "icon.png")
+    else:
+        candidate = os.path.join(os.path.dirname(__file__), "data", "icon.png")
+    return candidate if os.path.exists(candidate) else None
 
 class App(ctk.CTk):
     """Main application window."""
@@ -31,6 +42,16 @@ class App(ctk.CTk):
 
         self.title("Elasticsearch Snapshot Monitor")
         self.geometry("1100x750")
+
+        # Set window / taskbar icon if available
+        try:
+            import tkinter as tk
+            ipath = _icon_path()
+            if ipath:
+                self._app_icon = tk.PhotoImage(file=ipath)
+                self.iconphoto(True, self._app_icon)
+        except Exception:
+            pass
 
         self.cluster_statuses: List[ClusterStatus] = []
         self._refresh_timer = None

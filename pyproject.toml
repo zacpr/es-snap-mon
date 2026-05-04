@@ -21,3 +21,8 @@ packages = ["src/es_snap_mon"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "src/es_snap_mon/data/ca.pem" = "es_snap_mon/data/ca.pem"
+"src/es_snap_mon/data/icon.png" = "es_snap_mon/data/icon.png"
+"src/es_snap_mon/data/icon-64.png" = "es_snap_mon/data/icon-64.png"
+"src/es_snap_mon/data/icon-48.png" = "es_snap_mon/data/icon-48.png"
+"src/es_snap_mon/data/icon-32.png" = "es_snap_mon/data/icon-32.png"
+"src/es_snap_mon/data/icon.ico" = "es_snap_mon/data/icon.ico"
