@@ -30,10 +30,11 @@ jobs:
         shell: pwsh
         run: |
           pyinstaller --noconfirm --windowed --name "ESSnapMon" `
+            --paths src `
             --collect-all customtkinter `
             --collect-submodules keyring.backends `
             --add-data "src/es_snap_mon/data/ca.pem;es_snap_mon/data" `
-            src/es_snap_mon/__main__.py
+            packaging/launcher.py
 
       - name: Install Inno Setup
         shell: pwsh
@@ -74,10 +75,11 @@ jobs:
       - name: Build with PyInstaller
         run: |
           pyinstaller --noconfirm --name es-snap-mon \
+            --paths src \
             --collect-all customtkinter \
             --collect-submodules keyring.backends \
             --add-data "src/es_snap_mon/data/ca.pem:es_snap_mon/data" \
-            src/es_snap_mon/__main__.py
+            packaging/launcher.py
 
       - name: Stage payload
         run: |
