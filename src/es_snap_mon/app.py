@@ -121,10 +121,11 @@ class App(ctk.CTk):
         self.scroll.grid(row=1, column=0, sticky="nsew")
         self.scroll.grid_columnconfigure(0, weight=1)
 
-        # Off-screen buffer used for flicker-free refreshes (double-buffering).
-        # We build the next frame's cards in here, then swap it in.
-        self._scroll_buffer = ctk.CTkFrame(self.content, fg_color="transparent")
-        self._scroll_buffer.grid_columnconfigure(0, weight=1)
+        # Cards reused across refreshes — keyed by cluster name so we only
+        # rebuild a card's contents when its data changes, instead of tearing
+        # down and rebuilding every card frame on every refresh.
+        self._card_widgets: dict[str, ClusterCard] = {}
+        self._empty_label: ctk.CTkLabel | None = None
 
         self.spinner = ctk.CTkLabel(
             self.content,
@@ -256,46 +257,56 @@ class App(ctk.CTk):
             self._schedule_refresh(self.REFRESH_INTERVAL)
 
     def _render_cards(self):
-        # Double-buffered render: build the new content in an off-screen frame,
-        # then swap it in. This eliminates the flash where the old cards are
-        # destroyed before the new ones appear.
-        buf = self._scroll_buffer
+        # Reuse existing card widgets; only refresh content for clusters whose
+        # data actually changed. Add cards for new clusters, remove stale ones.
 
-        # Clear buffer (it should already be empty between renders, but be safe)
-        for widget in buf.winfo_children():
-            widget.destroy()
-
+        # Empty state
         if not self.cluster_statuses:
-            empty = ctk.CTkLabel(
-                buf,
-                text="No clusters configured.\nClick 'Add Cluster' or 'Load Presets' to get started.",
-                font=ctk.CTkFont(size=16),
-                text_color=("#999999", "#64748b"),
-                justify="center",
-            )
-            empty.grid(row=0, column=0, pady=80)
-        else:
-            for i, status in enumerate(self.cluster_statuses):
-                history = self._speed_history.get(status.config.name, [])
+            for card in self._card_widgets.values():
+                card.destroy()
+            self._card_widgets.clear()
+            if self._empty_label is None:
+                self._empty_label = ctk.CTkLabel(
+                    self.scroll,
+                    text="No clusters configured.\nClick 'Add Cluster' or 'Load Presets' to get started.",
+                    font=ctk.CTkFont(size=16),
+                    text_color=("#999999", "#64748b"),
+                    justify="center",
+                )
+                self._empty_label.grid(row=0, column=0, pady=80)
+            return
+
+        # Drop empty-state label if it was showing
+        if self._empty_label is not None:
+            self._empty_label.destroy()
+            self._empty_label = None
+
+        seen: set[str] = set()
+        for i, status in enumerate(self.cluster_statuses):
+            name = status.config.name
+            seen.add(name)
+            history = self._speed_history.get(name, [])
+            card = self._card_widgets.get(name)
+            if card is None:
                 card = ClusterCard(
-                    buf,
+                    self.scroll,
                     status=status,
                     speed_history=history,
-                    on_remove=lambda n=status.config.name: self._confirm_remove(n),
+                    on_remove=lambda n=name: self._confirm_remove(n),
                     on_edit=lambda s=status: self._open_edit_dialog(s),
                 )
-                card.grid(row=i, column=0, sticky="ew", padx=8, pady=6)
+                self._card_widgets[name] = card
+            else:
+                # Keep callbacks bound to the latest status object
+                card.on_edit = lambda s=status: self._open_edit_dialog(s)
+                card.on_remove = lambda n=name: self._confirm_remove(n)
+                card.refresh(status, history)
+            card.grid(row=i, column=0, sticky="ew", padx=8, pady=6)
 
-        # Swap: old visible frame becomes the new buffer, buffer becomes visible.
-        old_visible = self.scroll
-        old_visible.grid_forget()
-        buf.grid(row=1, column=0, sticky="nsew")
-        self.scroll = buf
-        self._scroll_buffer = old_visible
-
-        # Tear down the now-hidden old cards after the swap is on screen.
-        # Using `after_idle` keeps the destruction off the critical render path.
-        self.after_idle(lambda f=old_visible: [w.destroy() for w in f.winfo_children()])
+        # Remove cards for clusters that no longer exist
+        for stale in [n for n in self._card_widgets if n not in seen]:
+            self._card_widgets[stale].destroy()
+            del self._card_widgets[stale]
 
     def _open_add_dialog(self):
         AddClusterDialog(self, on_save=self._trigger_refresh)

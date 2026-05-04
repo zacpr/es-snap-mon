@@ -237,6 +237,14 @@ class ClusterCard(ctk.CTkFrame):
         self.on_toggle_ssl = on_toggle_ssl
         self._build()
 
+    def refresh(self, status: ClusterStatus, speed_history=None):
+        """Update this card in-place with new data, no card-frame churn."""
+        self.status = status
+        self.speed_history = speed_history or []
+        for child in self.winfo_children():
+            child.destroy()
+        self._build()
+
     def _build(self):
         cfg = self.status.config
 
