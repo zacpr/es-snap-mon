@@ -1062,11 +1062,21 @@ class AnalysisScopeDialog:
 
         self.dialog = tk.Toplevel(master)
         self.dialog.title("Analyze Performance — Scope")
-        self.dialog.geometry("560x600")
+        self.dialog.geometry("620x680")
+        self.dialog.minsize(520, 520)
         self.dialog.transient(master)
 
-        frame = ctk.CTkFrame(self.dialog)
-        frame.pack(fill="both", expand=True, padx=14, pady=14)
+        outer = ctk.CTkFrame(self.dialog)
+        outer.pack(fill="both", expand=True, padx=14, pady=14)
+
+        # Pack the action bar FIRST at the bottom so it's never clipped
+        # by long cluster/section lists.
+        btns = ctk.CTkFrame(outer, fg_color="transparent")
+        btns.pack(side="bottom", fill="x", padx=12, pady=(8, 6))
+
+        # Scrollable content above the action bar.
+        frame = ctk.CTkScrollableFrame(outer, fg_color="transparent")
+        frame.pack(side="top", fill="both", expand=True)
 
         ctk.CTkLabel(
             frame,
@@ -1085,7 +1095,7 @@ class AnalysisScopeDialog:
             frame, text="Clusters", font=ctk.CTkFont(size=13, weight="bold")
         ).pack(anchor="w", padx=12, pady=(6, 2))
 
-        cluster_box = ctk.CTkScrollableFrame(frame, fg_color=("#f3f4f6", "#1f2937"), height=160)
+        cluster_box = ctk.CTkFrame(frame, fg_color=("#f3f4f6", "#1f2937"))
         cluster_box.pack(fill="x", padx=12, pady=(0, 4))
         self.cluster_vars: dict[str, ctk.BooleanVar] = {}
         for st in cluster_statuses:
@@ -1142,9 +1152,7 @@ class AnalysisScopeDialog:
             command=lambda: [v.set(False) for v in self.section_vars.values()],
         ).pack(side="left")
 
-        # --- Action buttons ---
-        btns = ctk.CTkFrame(frame, fg_color="transparent")
-        btns.pack(fill="x", padx=12, pady=(12, 6))
+        # --- Action buttons (already-packed at the bottom) ---
 
         # Live, coarse token estimate. Real size depends on cluster shape;
         # this is a heuristic so users can see relative impact while toggling.
