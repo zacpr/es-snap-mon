@@ -157,9 +157,14 @@ class App(ctk.CTk):
         )
         self.header.grid(row=0, column=0, sticky="w", pady=(0, 14))
 
-        self.scroll = ctk.CTkFrame(self.content, fg_color="transparent")
+        self.scroll = ctk.CTkScrollableFrame(self.content, fg_color="transparent")
         self.scroll.grid(row=1, column=0, sticky="nsew")
         self.scroll.grid_columnconfigure(0, weight=1)
+        # Mouse-wheel scrolling on the whole content area
+        try:
+            self.scroll._parent_canvas.configure(yscrollincrement=20)
+        except Exception:
+            pass
 
         # Cards reused across refreshes — keyed by cluster name so we only
         # rebuild a card's contents when its data changes, instead of tearing
