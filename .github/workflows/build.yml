@@ -24,22 +24,21 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pyinstaller
-          pip install -e .
+          pip install .
 
       - name: Build with PyInstaller
         shell: pwsh
         run: |
           pyinstaller --noconfirm --windowed --name "ESSnapMon" `
-            --paths src `
             --hidden-import es_snap_mon `
             --hidden-import es_snap_mon.app `
             --hidden-import es_snap_mon.widgets `
             --hidden-import es_snap_mon.es_client `
             --hidden-import es_snap_mon.config_manager `
             --hidden-import es_snap_mon.models `
+            --collect-all es_snap_mon `
             --collect-all customtkinter `
             --collect-submodules keyring.backends `
-            --add-data "src/es_snap_mon/data/ca.pem;es_snap_mon/data" `
             packaging/launcher.py
 
       - name: Install Inno Setup
@@ -76,21 +75,20 @@ jobs:
           sudo gem install --no-document fpm
           python -m pip install --upgrade pip
           pip install pyinstaller
-          pip install -e .
+          pip install .
 
       - name: Build with PyInstaller
         run: |
           pyinstaller --noconfirm --name es-snap-mon \
-            --paths src \
             --hidden-import es_snap_mon \
             --hidden-import es_snap_mon.app \
             --hidden-import es_snap_mon.widgets \
             --hidden-import es_snap_mon.es_client \
             --hidden-import es_snap_mon.config_manager \
             --hidden-import es_snap_mon.models \
+            --collect-all es_snap_mon \
             --collect-all customtkinter \
             --collect-submodules keyring.backends \
-            --add-data "src/es_snap_mon/data/ca.pem:es_snap_mon/data" \
             packaging/launcher.py
 
       - name: Stage payload
