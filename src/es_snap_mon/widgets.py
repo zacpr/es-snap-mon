@@ -649,7 +649,7 @@ class ClusterCard(ctk.CTkFrame):
             if self.speed_history and len(self.speed_history) >= 1:
                 graph_frame = ctk.CTkFrame(self, fg_color="transparent")
                 graph_frame.pack(fill="x", padx=18, pady=(2, 4))
-                if self.scenic_mode:
+                if self.scenic_mode and snap.state == SnapshotState.IN_PROGRESS:
                     # Scenic parallax strip (trees + animals) to create a
                     # subtle "passing train / mountain range" vibe without
                     # obscuring data.
