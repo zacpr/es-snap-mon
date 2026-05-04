@@ -282,7 +282,9 @@ class App(ctk.CTk):
                     status=status,
                     speed_history=history,
                     on_remove=lambda n=status.config.name: self._confirm_remove(n),
-                on_edit=lambda s=status: self._open_edit_dialog(s),
+                    on_edit=lambda s=status: self._open_edit_dialog(s),
+                )
+                card.grid(row=i, column=0, sticky="ew", padx=8, pady=6)
 
         # Swap: old visible frame becomes the new buffer, buffer becomes visible.
         old_visible = self.scroll
