@@ -40,23 +40,30 @@ def _clean_env() -> dict:
 
 def _open_url(url: str) -> bool:
     """Open a URL in the user's browser, robust to PyInstaller envs."""
-    # Linux: prefer xdg-open / kde-open / gio with a sanitized environment.
     if sys.platform.startswith("linux"):
         env = _clean_env()
         for cmd in (["xdg-open", url], ["gio", "open", url], ["kde-open", url], ["kde-open5", url]):
             try:
-                subprocess.Popen(
+                proc = subprocess.Popen(
                     cmd,
                     env=env,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     start_new_session=True,
                 )
-                return True
             except FileNotFoundError:
                 continue
             except Exception:
                 continue
+            # Give it a brief moment to fail (xdg-open exits 0 on success).
+            try:
+                rc = proc.wait(timeout=1.5)
+                if rc == 0:
+                    return True
+                # Non-zero exit = try the next opener
+            except subprocess.TimeoutExpired:
+                # Still running = it almost certainly handed off to a browser
+                return True
         # Fall through to webbrowser as a last resort
     try:
         return bool(webbrowser.open(url, new=2))
@@ -772,7 +779,7 @@ class AISettingsDialog:
             justify="left",
         ).pack(anchor="w", padx=14, pady=(0, 6))
         signin_btns = ctk.CTkFrame(signin, fg_color="transparent")
-        signin_btns.pack(fill="x", padx=10, pady=(0, 10))
+        signin_btns.pack(fill="x", padx=10, pady=(0, 6))
         ctk.CTkButton(
             signin_btns,
             text="Get a Token  ↗",
@@ -781,12 +788,28 @@ class AISettingsDialog:
         ).pack(side="left", padx=(4, 6))
         ctk.CTkButton(
             signin_btns,
+            text="Copy URL",
+            width=110,
+            fg_color="transparent",
+            border_width=1,
+            command=self._copy_token_url,
+        ).pack(side="left", padx=(0, 6))
+        ctk.CTkButton(
+            signin_btns,
             text="Paste from Clipboard",
             width=160,
             fg_color="transparent",
             border_width=1,
             command=self._paste_clipboard,
         ).pack(side="left")
+
+        # Always-visible, selectable URL so the user can see + copy it manually.
+        url_row = ctk.CTkFrame(signin, fg_color="transparent")
+        url_row.pack(fill="x", padx=10, pady=(0, 10))
+        url_entry = ctk.CTkEntry(url_row, font=ctk.CTkFont(size=10))
+        url_entry.insert(0, self.GITHUB_TOKEN_URL)
+        url_entry.configure(state="readonly")
+        url_entry.pack(fill="x")
 
         ctk.CTkLabel(
             frame,
@@ -840,6 +863,8 @@ class AISettingsDialog:
         self.dialog.grab_set()
 
     def _open_github_tokens(self):
+        # Always print the URL too so the user has a fallback in the terminal.
+        print(f"[es-snap-mon] GitHub token URL: {self.GITHUB_TOKEN_URL}", file=sys.stderr)
         if _open_url(self.GITHUB_TOKEN_URL):
             self.status_label.configure(
                 text="Opened browser. Generate a token, copy it, then paste it below.",
@@ -856,6 +881,17 @@ class AISettingsDialog:
                 )
             except Exception as e:
                 self.status_label.configure(text=f"Could not open browser: {e}", text_color="#e74c3c")
+
+    def _copy_token_url(self):
+        try:
+            self.dialog.clipboard_clear()
+            self.dialog.clipboard_append(self.GITHUB_TOKEN_URL)
+            self.status_label.configure(
+                text="URL copied to clipboard — paste into your browser.",
+                text_color="#3498db",
+            )
+        except Exception as e:
+            self.status_label.configure(text=f"Copy failed: {e}", text_color="#e74c3c")
 
     def _paste_clipboard(self):
         try:
