@@ -602,13 +602,15 @@ class AddClusterDialog:
         from .es_client import fetch_cluster_status
         from .models import ClusterConfig
 
+        ca_cert = self.existing.config.ca_cert if self.existing else None
         cfg = ClusterConfig(
             name="test",
             host=self.host_entry.get().strip(),
             snapshot_repo="test",
             slm_policy="test",
             username=self.user_entry.get().strip(),
-            verify_ssl=self.ssl_var.get(),
+            verify_ssl=bool(self.ssl_var.get()),
+            ca_cert=ca_cert,
         )
         pwd = self.pass_entry.get()
         result = fetch_cluster_status(cfg, pwd)
@@ -625,7 +627,13 @@ class AddClusterDialog:
         from .models import ClusterConfig
         from .config_manager import save_cluster
 
-        name = self.name_entry.get().strip()
+        # When editing, the name field is disabled — read from existing config.
+        if self.existing:
+            name = self.existing.config.name
+            ca_cert = self.existing.config.ca_cert
+        else:
+            name = self.name_entry.get().strip()
+            ca_cert = None
         host = self.host_entry.get().strip()
         repo = self.repo_entry.get().strip()
         slm = self.slm_entry.get().strip()
@@ -643,6 +651,7 @@ class AddClusterDialog:
             slm_policy=slm,
             username=user,
             verify_ssl=bool(self.ssl_var.get()),
+            ca_cert=ca_cert,
         )
         save_cluster(cfg, pwd)
         self.on_save()

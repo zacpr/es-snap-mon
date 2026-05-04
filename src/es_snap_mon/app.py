@@ -282,13 +282,7 @@ class App(ctk.CTk):
                     status=status,
                     speed_history=history,
                     on_remove=lambda n=status.config.name: self._confirm_remove(n),
-                    on_toggle_ssl=lambda n=status.config.name: self._do_toggle_ssl(n),
-                )
-                card.grid(row=i, column=0, sticky="ew", pady=(0, 12))
-
-        # Force the buffer to compute its layout while still off-screen so the
-        # swap is instantaneous and there's nothing for the user to see redraw.
-        buf.update_idletasks()
+                on_edit=lambda s=status: self._open_edit_dialog(s),
 
         # Swap: old visible frame becomes the new buffer, buffer becomes visible.
         old_visible = self.scroll
@@ -303,6 +297,9 @@ class App(ctk.CTk):
 
     def _open_add_dialog(self):
         AddClusterDialog(self, on_save=self._trigger_refresh)
+
+    def _open_edit_dialog(self, status: ClusterStatus):
+        AddClusterDialog(self, on_save=self._trigger_refresh, existing=status)
 
     def _do_toggle_ssl(self, name: str):
         new_val = toggle_ssl_verify(name)
