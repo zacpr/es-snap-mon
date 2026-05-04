@@ -282,10 +282,19 @@ class MiniSparkline(ctk.CTkFrame):
 class ParallaxStrip(ctk.CTkFrame):
     """Tiny animated scenery strip to add motion above the sparkline."""
 
-    def __init__(self, master, height: int = 30, pace: float = 1.0, frenzy: bool = False, **kwargs):
+    def __init__(
+        self,
+        master,
+        height: int = 30,
+        pace: float = 1.0,
+        frenzy: bool = False,
+        intensity: float = 1.0,
+        **kwargs,
+    ):
         super().__init__(master, height=height, **kwargs)
         self._h = height
-        self._pace = max(0.6, min(pace, 2.2))
+        self._intensity = max(0.65, min(intensity, 1.45))
+        self._pace = max(0.6, min(pace * self._intensity, 2.8))
         self._frenzy = frenzy
         self._running = True
         self._after_id = None
@@ -306,6 +315,8 @@ class ParallaxStrip(ctk.CTkFrame):
         # Seed a few moving silhouettes in two layers.
         near_count = 8 if frenzy else 4
         far_count = 6 if frenzy else 3
+        near_count = max(2, int(round(near_count * self._intensity)))
+        far_count = max(2, int(round(far_count * self._intensity)))
         for _ in range(near_count):
             self._sprites.append(self._new_sprite(layer=0, seed_x=None))
         for _ in range(far_count):
@@ -490,6 +501,7 @@ class ClusterCard(ctk.CTkFrame):
         speed_history=None,
         scenic_mode: bool = True,
         frenzy_mode: bool = False,
+        parallax_intensity: float = 1.0,
         on_remove=None,
         on_edit=None,
         on_toggle_ssl=None,
@@ -499,6 +511,7 @@ class ClusterCard(ctk.CTkFrame):
         self.speed_history = speed_history or []
         self.scenic_mode = scenic_mode
         self.frenzy_mode = frenzy_mode
+        self.parallax_intensity = parallax_intensity
         self.on_remove = on_remove
         self.on_edit = on_edit
         self.on_toggle_ssl = on_toggle_ssl
@@ -514,6 +527,7 @@ class ClusterCard(ctk.CTkFrame):
         self._slm_running_label = None
         self._render_scenic_mode = scenic_mode
         self._render_frenzy_mode = frenzy_mode
+        self._render_parallax_intensity = parallax_intensity
         self._build()
 
     def refresh(
@@ -522,6 +536,7 @@ class ClusterCard(ctk.CTkFrame):
         speed_history=None,
         scenic_mode: bool | None = None,
         frenzy_mode: bool | None = None,
+        parallax_intensity: float | None = None,
     ):
         """Update this card in-place with new data, no card-frame churn."""
         old_status = self.status
@@ -531,6 +546,8 @@ class ClusterCard(ctk.CTkFrame):
             self.scenic_mode = scenic_mode
         if frenzy_mode is not None:
             self.frenzy_mode = frenzy_mode
+        if parallax_intensity is not None:
+            self.parallax_intensity = parallax_intensity
 
         # Fast path: same active snapshot, same visual layout -> update widgets
         # in place to avoid destroy/rebuild flicker during refresh.
@@ -565,6 +582,8 @@ class ClusterCard(ctk.CTkFrame):
         if self.scenic_mode != self._render_scenic_mode:
             return False
         if self.frenzy_mode != self._render_frenzy_mode:
+            return False
+        if abs(self.parallax_intensity - self._render_parallax_intensity) > 1e-6:
             return False
         return True
 
@@ -622,6 +641,7 @@ class ClusterCard(ctk.CTkFrame):
     def _build(self):
         self._render_scenic_mode = self.scenic_mode
         self._render_frenzy_mode = self.frenzy_mode
+        self._render_parallax_intensity = self.parallax_intensity
         self._render_mode = "idle"
         cfg = self.status.config
 
@@ -822,6 +842,7 @@ class ClusterCard(ctk.CTkFrame):
                         height=30,
                         pace=pace,
                         frenzy=self.frenzy_mode,
+                        intensity=self.parallax_intensity,
                     ).pack(fill="x", pady=(0, 2))
                 self._sparkline = MiniSparkline(graph_frame, data=self.speed_history, height=50)
                 self._sparkline.pack(fill="x")

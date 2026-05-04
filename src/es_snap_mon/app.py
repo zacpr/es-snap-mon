@@ -59,6 +59,7 @@ class App(ctk.CTk):
         self._refreshing = False
         self._scenic_mode = True
         self._parallax_test_mode = "auto"  # auto | normal | stampede
+        self._parallax_intensity = 1.0  # 0.75 calm | 1.0 normal | 1.35 wild
         self._last_poll: dict[str, tuple[float, int, int]] = {}  # (time, bytes, shards)
         self._speed_history: dict[str, list[tuple[float, float]]] = {}  # name -> [(time, bps), ...]
         self._shard_rate_history: dict[str, list[tuple[float, float]]] = {}  # name -> [(time, shards/sec), ...]
@@ -72,6 +73,8 @@ class App(ctk.CTk):
         self.minsize(900, 600)
         # Secret test hotkey: Ctrl+Shift+P cycles auto/normal/stampede.
         self.bind_all("<Control-Shift-P>", self._cycle_parallax_test_mode)
+        # Secret hotkey: Ctrl+Shift+I cycles cinematic intensity.
+        self.bind_all("<Control-Shift-I>", self._cycle_parallax_intensity)
         self.lift()
         # Trigger first refresh shortly after window shows
         self.after(800, self._trigger_refresh)
@@ -228,6 +231,13 @@ class App(ctk.CTk):
         self.status_label.configure(text=label)
         self._render_cards()
 
+    def _cycle_parallax_intensity(self, _event=None):
+        levels = [(0.75, "CALM"), (1.0, "NORMAL"), (1.35, "WILD")]
+        current = next((i for i, (v, _) in enumerate(levels) if abs(v - self._parallax_intensity) < 1e-6), 1)
+        self._parallax_intensity, name = levels[(current + 1) % len(levels)]
+        self.status_label.configure(text=f"Parallax intensity: {name}")
+        self._render_cards()
+
     def _schedule_refresh(self, delay: float):
         self._cancel_refresh()
         if self._auto_refresh or delay < 1:
@@ -370,7 +380,13 @@ class App(ctk.CTk):
             name = status.config.name
             seen.add(name)
             history = self._speed_history.get(name, [])
-            fp = self._card_fingerprint(status, history, self._scenic_mode, all_active)
+            fp = self._card_fingerprint(
+                status,
+                history,
+                self._scenic_mode,
+                all_active,
+                self._parallax_intensity,
+            )
             card = self._card_widgets.get(name)
             if card is None:
                 card = ClusterCard(
@@ -379,6 +395,7 @@ class App(ctk.CTk):
                     speed_history=history,
                     scenic_mode=self._scenic_mode,
                     frenzy_mode=all_active,
+                    parallax_intensity=self._parallax_intensity,
                     on_remove=lambda n=name: self._confirm_remove(n),
                     on_edit=lambda s=status: self._open_edit_dialog(s),
                 )
@@ -394,6 +411,7 @@ class App(ctk.CTk):
                         history,
                         scenic_mode=self._scenic_mode,
                         frenzy_mode=all_active,
+                        parallax_intensity=self._parallax_intensity,
                     )
                     self._card_fingerprints[name] = fp
             card.grid(row=i, column=0, sticky="ew", padx=8, pady=6)
@@ -405,7 +423,13 @@ class App(ctk.CTk):
             self._card_fingerprints.pop(stale, None)
 
     @staticmethod
-    def _card_fingerprint(status: ClusterStatus, history: list[tuple[float, float]], scenic: bool, frenzy: bool) -> tuple:
+    def _card_fingerprint(
+        status: ClusterStatus,
+        history: list[tuple[float, float]],
+        scenic: bool,
+        frenzy: bool,
+        parallax_intensity: float,
+    ) -> tuple:
         """Compact signature of fields that materially affect rendered card UI."""
         s = status.snapshot_info
         st = status.snapshot_stats
@@ -429,6 +453,7 @@ class App(ctk.CTk):
             status.slm_next_run or "",
             scenic,
             frenzy,
+            round(parallax_intensity, 2),
             hist_tail,
         )
 
