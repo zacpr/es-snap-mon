@@ -792,7 +792,7 @@ class AISettingsDialog:
 
         self.dialog = tk.Toplevel(master)
         self.dialog.title("AI Settings")
-        self.dialog.geometry("600x540")
+        self.dialog.geometry("600x600")
         self.dialog.transient(master)
         self.dialog.configure(bg="#2b2b2b")
 
@@ -887,9 +887,33 @@ class AISettingsDialog:
         self.base_entry.grid(row=0, column=1, sticky="ew", pady=2)
         self.base_entry.insert(0, settings.base_url)
         ctk.CTkLabel(adv, text="Model", font=ctk.CTkFont(size=11)).grid(row=1, column=0, sticky="w", padx=(0, 8), pady=2)
-        self.model_entry = ctk.CTkEntry(adv)
+        # Editable combobox: pick from common GitHub Models or type any other id.
+        # Larger context windows help when many clusters are analyzed at once.
+        model_values = [
+            "openai/gpt-4.1",            # 1M ctx — best for big diagnostics
+            "openai/gpt-4.1-mini",
+            "openai/gpt-4.1-nano",
+            "openai/gpt-4o",
+            "openai/gpt-4o-mini",
+            "openai/gpt-5",
+            "openai/gpt-5-mini",
+            "openai/o1",
+            "openai/o1-mini",
+            "openai/o3-mini",
+            "meta/Llama-3.3-70B-Instruct",
+            "mistral-ai/Mistral-Large-2411",
+        ]
+        self.model_entry = ctk.CTkComboBox(adv, values=model_values)
         self.model_entry.grid(row=1, column=1, sticky="ew", pady=2)
-        self.model_entry.insert(0, settings.model)
+        self.model_entry.set(settings.model)
+        ctk.CTkLabel(
+            adv,
+            text="Tip: ‘openai/gpt-4.1’ has the largest context — best when analyzing many clusters.",
+            font=ctk.CTkFont(size=10),
+            text_color=("#666", "#94a3b8"),
+            wraplength=480,
+            justify="left",
+        ).grid(row=2, column=1, sticky="w", pady=(2, 0))
 
         self.status_label = ctk.CTkLabel(frame, text="", font=ctk.CTkFont(size=11))
         self.status_label.pack(anchor="w", padx=20, pady=(10, 0))
