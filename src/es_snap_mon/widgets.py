@@ -290,6 +290,8 @@ class ParallaxStrip(ctk.CTkFrame):
         self._running = True
         self._after_id = None
         self._sprites: list[dict] = []
+        self._band_offsets = [0.0, 0.0, 0.0]
+        self._band_speeds = [0.12 * self._pace, 0.24 * self._pace, 0.45 * self._pace]
 
         self._canvas = tk.Canvas(
             self,
@@ -346,6 +348,30 @@ class ParallaxStrip(ctk.CTkFrame):
             outline="",
             tags="bg",
         )
+
+    def _draw_moving_bands(self):
+        w = self._canvas.winfo_width()
+        if w < 10:
+            return
+        h = self._h
+        self._canvas.delete("band")
+
+        # Three soft bands at different depths/speeds.
+        specs = [
+            (self._band_offsets[0], h * 0.78, 10, "#15314b"),
+            (self._band_offsets[1], h * 0.72, 8, "#1b3c59"),
+            (self._band_offsets[2], h * 0.66, 6, "#234a6d"),
+        ]
+        for off, base_y, amp, color in specs:
+            pts = []
+            x = -40
+            while x <= w + 40:
+                y = base_y + ((x + off) % 90) / 90.0 * amp - (amp / 2)
+                pts.extend([x, y])
+                x += 12
+            # close polygon to bottom so it reads like a moving ridge layer
+            pts.extend([w + 40, h, -40, h])
+            self._canvas.create_polygon(pts, fill=color, outline="", smooth=True, tags="band")
         # Nearer ridge
         self._canvas.create_polygon(
             0, h,
@@ -423,6 +449,9 @@ class ParallaxStrip(ctk.CTkFrame):
             return
 
         self._canvas.delete("sprite")
+        for i in range(3):
+            self._band_offsets[i] = (self._band_offsets[i] + self._band_speeds[i]) % 360
+        self._draw_moving_bands()
         for sp in self._sprites:
             sp["x"] -= sp["speed"]
             if sp["x"] < -24:
@@ -473,6 +502,18 @@ class ClusterCard(ctk.CTkFrame):
         self.on_remove = on_remove
         self.on_edit = on_edit
         self.on_toggle_ssl = on_toggle_ssl
+        self._render_mode = "unknown"
+        self._state_badge_label = None
+        self._name_widget = None
+        self._pct_label = None
+        self._progress = None
+        self._sparkline = None
+        self._stat_values: dict[str, ctk.CTkLabel] = {}
+        self._slm_last_label = None
+        self._slm_next_label = None
+        self._slm_running_label = None
+        self._render_scenic_mode = scenic_mode
+        self._render_frenzy_mode = frenzy_mode
         self._build()
 
     def refresh(
@@ -483,17 +524,105 @@ class ClusterCard(ctk.CTkFrame):
         frenzy_mode: bool | None = None,
     ):
         """Update this card in-place with new data, no card-frame churn."""
+        old_status = self.status
         self.status = status
         self.speed_history = speed_history or []
         if scenic_mode is not None:
             self.scenic_mode = scenic_mode
         if frenzy_mode is not None:
             self.frenzy_mode = frenzy_mode
+
+        # Fast path: same active snapshot, same visual layout -> update widgets
+        # in place to avoid destroy/rebuild flicker during refresh.
+        if self._can_fast_update(old_status, status):
+            self._update_in_place()
+            return
+
         for child in self.winfo_children():
             child.destroy()
+        self._stat_values = {}
         self._build()
 
+    def _can_fast_update(self, old_status: ClusterStatus, new_status: ClusterStatus) -> bool:
+        if self._render_mode != "snapshot":
+            return False
+        if old_status.error_message or new_status.error_message:
+            return False
+        if old_status.reachable != new_status.reachable:
+            return False
+        old_snap = old_status.snapshot_info
+        new_snap = new_status.snapshot_info
+        old_stats = old_status.snapshot_stats
+        new_stats = new_status.snapshot_stats
+        if not old_snap or not new_snap or not old_stats or not new_stats:
+            return False
+        if old_snap.name != new_snap.name or old_snap.state != new_snap.state:
+            return False
+        if old_snap.state != SnapshotState.IN_PROGRESS:
+            return False
+        if bool(old_stats.has_byte_stats) != bool(new_stats.has_byte_stats):
+            return False
+        if self.scenic_mode != self._render_scenic_mode:
+            return False
+        if self.frenzy_mode != self._render_frenzy_mode:
+            return False
+        return True
+
+    def _update_in_place(self):
+        snap = self.status.snapshot_info
+        stats = self.status.snapshot_stats
+        if not snap or not stats:
+            return
+
+        if self._state_badge_label is not None:
+            self._state_badge_label.configure(text=snap.state.value)
+
+        if self._name_widget is not None:
+            try:
+                self._name_widget.configure(state="normal")
+                self._name_widget.delete("1.0", "end")
+                self._name_widget.insert("1.0", snap.name)
+                self._name_widget.configure(state="disabled")
+            except Exception:
+                pass
+
+        if self._progress is not None:
+            self._progress.set(stats.progress_pct / 100.0)
+        if self._pct_label is not None:
+            self._pct_label.configure(text=f"{stats.progress_pct:.1f}%")
+        if self._sparkline is not None:
+            self._sparkline.set_data(self.speed_history)
+
+        self._set_stat("Data", f"{stats.processed_human} / {stats.total_human}")
+        self._set_stat("Files", f"{stats.processed_files:,} / {stats.total_files:,}")
+        self._set_stat("Shards", f"{snap.shards_successful}/{snap.shards_total}")
+        eta_text = stats.eta_human
+        if stats.completion_human:
+            eta_text = f"{eta_text}   {stats.completion_human}"
+        self._set_stat("ETA", eta_text)
+        self._set_stat("ETA (est.)", eta_text)
+        self._set_stat("Speed", stats.current_speed_human)
+        self._set_stat("Avg", stats.avg_speed_human)
+        self._set_stat("Failed", str(snap.shards_failed))
+
+        if self._slm_last_label is not None and self.status.slm_last_run:
+            self._slm_last_label.configure(text=f"Last run: {self.status.slm_last_run}")
+        if self._slm_next_label is not None and self.status.slm_next_run:
+            self._slm_next_label.configure(text=f"Next run: {self.status.slm_next_run}")
+        if self._slm_running_label is not None:
+            self._slm_running_label.configure(
+                text="SLM policy running" if self.status.slm_in_progress else ""
+            )
+
+    def _set_stat(self, label: str, value: str):
+        w = self._stat_values.get(label)
+        if w is not None:
+            w.configure(text=value)
+
     def _build(self):
+        self._render_scenic_mode = self.scenic_mode
+        self._render_frenzy_mode = self.frenzy_mode
+        self._render_mode = "idle"
         cfg = self.status.config
 
         # Header row
@@ -559,6 +688,7 @@ class ClusterCard(ctk.CTkFrame):
 
         # Error display
         if self.status.error_message:
+            self._render_mode = "error"
             err = ctk.CTkLabel(
                 self,
                 text=f"⚠ {self.status.error_message}",
@@ -601,6 +731,7 @@ class ClusterCard(ctk.CTkFrame):
                 font=ctk.CTkFont(size=10, weight="bold"),
                 text_color="white",
             ).pack(padx=7, pady=2)
+            self._state_badge_label = badge.winfo_children()[-1]
 
             # Selectable, wrapping snapshot name (so users can copy it)
             import tkinter as _tk
@@ -636,6 +767,7 @@ class ClusterCard(ctk.CTkFrame):
             # Keep selection enabled while disabled
             name_widget.bind("<1>", lambda e: name_widget.focus_set())
             name_widget.pack(side="left", fill="x", expand=True, padx=(8, 6))
+            self._name_widget = name_widget
 
             def _copy_snap_name(t=name_text):
                 try:
@@ -658,21 +790,21 @@ class ClusterCard(ctk.CTkFrame):
                 prog_frame = ctk.CTkFrame(self, fg_color="transparent")
                 prog_frame.pack(fill="x", padx=18, pady=(4, 2))
 
-                self.progress = GradientProgressBar(
+                self._progress = GradientProgressBar(
                     prog_frame,
                     height=16,
                     value=stats.progress_pct / 100.0,
                 )
-                self.progress.pack(fill="x")
+                self._progress.pack(fill="x")
 
                 pct_text = f"{stats.progress_pct:.1f}%"
-                self.pct_label = ctk.CTkLabel(
+                self._pct_label = ctk.CTkLabel(
                     prog_frame,
                     text=pct_text,
                     font=ctk.CTkFont(size=11, weight="bold"),
                     text_color="#3498db",
                 )
-                self.pct_label.pack(anchor="e", pady=(2, 0))
+                self._pct_label.pack(anchor="e", pady=(2, 0))
 
             # Speed sparkline (if we have history)
             if self.speed_history and len(self.speed_history) >= 1:
@@ -691,7 +823,8 @@ class ClusterCard(ctk.CTkFrame):
                         pace=pace,
                         frenzy=self.frenzy_mode,
                     ).pack(fill="x", pady=(0, 2))
-                MiniSparkline(graph_frame, data=self.speed_history, height=50).pack(fill="x")
+                self._sparkline = MiniSparkline(graph_frame, data=self.speed_history, height=50)
+                self._sparkline.pack(fill="x")
 
             # Stats grid
             stats_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -745,6 +878,8 @@ class ClusterCard(ctk.CTkFrame):
                 if snap.shards_failed:
                     self._stat_item(stats_frame, "Failed", str(snap.shards_failed), row, col, color="#e74c3c")
 
+            self._render_mode = "snapshot"
+
         elif self.status.reachable:
             ctk.CTkLabel(
                 self,
@@ -759,28 +894,31 @@ class ClusterCard(ctk.CTkFrame):
             slm_frame.pack(fill="x", padx=14, pady=(2, 10))
 
             if self.status.slm_in_progress:
-                ctk.CTkLabel(
+                self._slm_running_label = ctk.CTkLabel(
                     slm_frame,
                     text="SLM policy running",
                     font=ctk.CTkFont(size=11, weight="bold"),
                     text_color="#3498db",
-                ).pack(anchor="w", padx=10, pady=(6, 2))
+                )
+                self._slm_running_label.pack(anchor="w", padx=10, pady=(6, 2))
 
             if self.status.slm_last_run:
-                ctk.CTkLabel(
+                self._slm_last_label = ctk.CTkLabel(
                     slm_frame,
                     text=f"Last run: {self.status.slm_last_run}",
                     font=ctk.CTkFont(size=11),
                     text_color=("#555555", "#94a3b8"),
-                ).pack(anchor="w", padx=10, pady=(4, 2))
+                )
+                self._slm_last_label.pack(anchor="w", padx=10, pady=(4, 2))
 
             if self.status.slm_next_run:
-                ctk.CTkLabel(
+                self._slm_next_label = ctk.CTkLabel(
                     slm_frame,
                     text=f"Next run: {self.status.slm_next_run}",
                     font=ctk.CTkFont(size=11),
                     text_color=("#555555", "#94a3b8"),
-                ).pack(anchor="w", padx=10, pady=(2, 6))
+                )
+                self._slm_next_label.pack(anchor="w", padx=10, pady=(2, 6))
 
     def _stat_item(self, parent, label: str, value: str, row: int, col: int, color=None):
         frame = ctk.CTkFrame(parent, fg_color="transparent")
@@ -791,12 +929,14 @@ class ClusterCard(ctk.CTkFrame):
             font=ctk.CTkFont(size=11),
             text_color=("#777777", "#64748b"),
         ).pack(side="left")
-        ctk.CTkLabel(
+        val = ctk.CTkLabel(
             frame,
             text=value,
             font=ctk.CTkFont(size=11, weight="bold"),
             text_color=color or ("#333333", "#e2e8f0"),
-        ).pack(side="left")
+        )
+        val.pack(side="left")
+        self._stat_values[label] = val
 
 
 class AddClusterDialog:
