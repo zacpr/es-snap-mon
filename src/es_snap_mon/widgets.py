@@ -416,14 +416,56 @@ class ClusterCard(ctk.CTkFrame):
                 text_color="white",
             ).pack(padx=7, pady=2)
 
+            # Selectable, wrapping snapshot name (so users can copy it)
+            import tkinter as _tk
+
             name_text = snap.name
-            if len(name_text) > 50:
-                name_text = name_text[:47] + "…"
-            ctk.CTkLabel(
+            _is_dark = ctk.get_appearance_mode() == "Dark"
+            # Match the card's background so the Text widget blends in
+            try:
+                _card_bg = self._apply_appearance_mode(self.cget("fg_color"))
+            except Exception:
+                _card_bg = "#2b2b2b" if _is_dark else "#dbdbdb"
+            name_widget = _tk.Text(
                 snap_frame,
-                text=name_text,
-                font=ctk.CTkFont(size=12, weight="bold"),
-            ).pack(side="left", padx=(8, 0))
+                wrap="word",
+                height=1,
+                borderwidth=0,
+                highlightthickness=0,
+                background=_card_bg,
+                foreground="#ffffff" if _is_dark else "#000000",
+                selectbackground="#3498db",
+                selectforeground="#ffffff",
+                font=("", 12, "bold"),
+                cursor="xterm",
+            )
+            name_widget.insert("1.0", name_text)
+            name_widget.update_idletasks()
+            try:
+                line_count = int(name_widget.index("end-1c").split(".")[0])
+                name_widget.configure(height=max(1, min(line_count, 3)))
+            except Exception:
+                pass
+            name_widget.configure(state="disabled")
+            # Keep selection enabled while disabled
+            name_widget.bind("<1>", lambda e: name_widget.focus_set())
+            name_widget.pack(side="left", fill="x", expand=True, padx=(8, 6))
+
+            def _copy_snap_name(t=name_text):
+                try:
+                    self.clipboard_clear()
+                    self.clipboard_append(t)
+                except Exception:
+                    pass
+
+            ctk.CTkButton(
+                snap_frame,
+                text="Copy",
+                width=52,
+                height=22,
+                font=ctk.CTkFont(size=10),
+                command=_copy_snap_name,
+            ).pack(side="right")
 
             # Progress bar
             if stats:
