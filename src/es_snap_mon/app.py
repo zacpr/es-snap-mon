@@ -10,7 +10,7 @@ import customtkinter as ctk
 from .config_manager import load_clusters, remove_cluster, get_password, load_presets, toggle_ssl_verify
 from .es_client import fetch_cluster_status, fetch_diagnostics
 from .models import ClusterStatus
-from .widgets import ClusterCard, AddClusterDialog, AISettingsDialog, AnalysisDialog
+from .widgets import ClusterCard, AddClusterDialog, AISettingsDialog, AnalysisDialog, AnalysisScopeDialog
 
 
 def _icon_path() -> str | None:
@@ -374,21 +374,34 @@ class App(ctk.CTk):
             self.status_label.configure(text="Nothing to analyze — refresh clusters first.")
             return
 
+        # Let the user choose which clusters + which diagnostic sections to send.
+        AnalysisScopeDialog(
+            self,
+            cluster_statuses=self.cluster_statuses,
+            on_confirm=self._begin_analysis,
+        )
+
+    def _begin_analysis(self, selected_clusters: set[str], selected_sections: set[str]):
         dlg = AnalysisDialog(self, title="Performance Analysis")
         dlg.set_text(
-            "Collecting cluster + node diagnostics from each reachable cluster…\n"
+            f"Collecting diagnostics from {len(selected_clusters)} cluster(s) — "
+            f"sections: {', '.join(sorted(selected_sections)) or '(none)'}\n"
             "This usually takes a few seconds.",
             header="Gathering diagnostics",
         )
-        threading.Thread(target=self._run_analysis, args=(dlg,), daemon=True).start()
+        threading.Thread(
+            target=self._run_analysis,
+            args=(dlg, selected_clusters, selected_sections),
+            daemon=True,
+        ).start()
 
-    def _run_analysis(self, dlg):
+    def _run_analysis(self, dlg, selected_clusters: set[str], selected_sections: set[str]):
         import json
         import sys
         import traceback
         from .ai_client import analyze, load_ai_settings
 
-        # 1. Collect diagnostics for every reachable cluster (in parallel).
+        # 1. Collect diagnostics for every selected reachable cluster (in parallel).
         diagnostics: dict[str, dict] = {}
         threads = []
         results: dict[str, dict] = {}
@@ -404,7 +417,7 @@ class App(ctk.CTk):
                 return
             pwd = get_password(status.config.name) or ""
             try:
-                diag = fetch_diagnostics(status.config, pwd)
+                diag = fetch_diagnostics(status.config, pwd, sections=selected_sections)
             except Exception as e:
                 print(f"[es-snap-mon] diagnostics error for {status.config.name}: {e}", file=sys.stderr)
                 traceback.print_exc()
@@ -412,7 +425,8 @@ class App(ctk.CTk):
             with lock:
                 results[status.config.name] = diag
 
-        for st in self.cluster_statuses:
+        targets = [s for s in self.cluster_statuses if s.config.name in selected_clusters]
+        for st in targets:
             t = threading.Thread(target=worker, args=(st,), daemon=True)
             t.start()
             threads.append(t)
@@ -428,7 +442,7 @@ class App(ctk.CTk):
 
         # 3. Build prompt (snapshot stats + diagnostics) and send.
         try:
-            prompt = self._build_analysis_prompt(diagnostics)
+            prompt = self._build_analysis_prompt(diagnostics, selected_clusters)
         except Exception as e:
             print("[es-snap-mon] failed to build analysis prompt:", e, file=sys.stderr)
             traceback.print_exc()
@@ -439,11 +453,22 @@ class App(ctk.CTk):
             ))
             return
 
+        # Rough token estimate: GPT-family tokenizers average ~4 chars/token.
+        approx_tokens = max(1, len(prompt) // 4)
+        print(
+            f"[es-snap-mon] prompt: {len(prompt):,} chars  ~{approx_tokens:,} tokens",
+            file=sys.stderr,
+        )
+        self.after(0, lambda t=approx_tokens, c=len(prompt): dlg.set_text(
+            f"Diagnostics collected. Sending to model…\n\n"
+            f"Prompt size: {c:,} chars  (~{t:,} tokens)",
+            header="Analyzing",
+        ))
+
         # Cap prompt size — GitHub Models has token limits.
         if len(prompt) > 60000:
             print(f"[es-snap-mon] truncating prompt {len(prompt)} -> 60000", file=sys.stderr)
             prompt = prompt[:60000] + "\n\n... (truncated)"
-
         try:
             reply = analyze(
                 prompt,
@@ -479,9 +504,13 @@ class App(ctk.CTk):
             return
 
         model = load_ai_settings().model
-        self.after(0, lambda: dlg.set_text(reply, header=f"Analysis ({model})"))
+        self.after(0, lambda: dlg.set_text(
+            reply
+            + f"\n\n—\nPrompt size: {len(prompt):,} chars  (~{approx_tokens:,} tokens)",
+            header=f"Analysis ({model})",
+        ))
 
-    def _build_analysis_prompt(self, diagnostics: dict | None = None) -> str:
+    def _build_analysis_prompt(self, diagnostics: dict | None = None, selected_clusters: set[str] | None = None) -> str:
         import json
         diagnostics = diagnostics or {}
         lines = [
@@ -493,6 +522,8 @@ class App(ctk.CTk):
         ]
         for s in self.cluster_statuses:
             cfg = s.config
+            if selected_clusters is not None and cfg.name not in selected_clusters:
+                continue
             lines.append(f"## Cluster: {cfg.name}")
             lines.append(f"- host: {cfg.host}")
             lines.append(f"- repo: {cfg.snapshot_repo}")

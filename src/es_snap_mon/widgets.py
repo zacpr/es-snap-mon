@@ -1033,6 +1033,163 @@ class AISettingsDialog:
         self.dialog.destroy()
 
 
+# All diagnostic sections that fetch_diagnostics() can produce.
+# Order here is the order shown in the AnalysisScopeDialog.
+DIAGNOSTIC_SECTIONS: list[tuple[str, str, bool]] = [
+    ("health",        "Cluster health (status, shard counts)",      True),
+    ("pending_tasks", "Pending cluster tasks",                       True),
+    ("nodes",         "Per-node JVM / GC / FS / CPU / thread pools", True),
+    ("repository",    "Snapshot repository settings",                True),
+    ("recoveries",    "Active shard recoveries",                     True),
+    ("shards",        "Shard allocation summary (large)",            False),
+]
+
+
+class AnalysisScopeDialog:
+    """Pick which clusters and which diagnostic sections to include."""
+
+    def __init__(self, master, cluster_statuses, on_confirm):
+        self.cluster_statuses = cluster_statuses
+        self.on_confirm = on_confirm
+
+        self.dialog = tk.Toplevel(master)
+        self.dialog.title("Analyze Performance — Scope")
+        self.dialog.geometry("560x600")
+        self.dialog.transient(master)
+
+        frame = ctk.CTkFrame(self.dialog)
+        frame.pack(fill="both", expand=True, padx=14, pady=14)
+
+        ctk.CTkLabel(
+            frame,
+            text="What should we send to the model?",
+            font=ctk.CTkFont(size=16, weight="bold"),
+        ).pack(anchor="w", padx=12, pady=(10, 2))
+        ctk.CTkLabel(
+            frame,
+            text="Smaller selections fit better in models with limited context.",
+            font=ctk.CTkFont(size=11),
+            text_color=("#666", "#94a3b8"),
+        ).pack(anchor="w", padx=12, pady=(0, 8))
+
+        # --- Clusters ---
+        ctk.CTkLabel(
+            frame, text="Clusters", font=ctk.CTkFont(size=13, weight="bold")
+        ).pack(anchor="w", padx=12, pady=(6, 2))
+
+        cluster_box = ctk.CTkScrollableFrame(frame, fg_color=("#f3f4f6", "#1f2937"), height=160)
+        cluster_box.pack(fill="x", padx=12, pady=(0, 4))
+        self.cluster_vars: dict[str, ctk.BooleanVar] = {}
+        for st in cluster_statuses:
+            name = st.config.name
+            default = st.reachable
+            var = ctk.BooleanVar(value=default)
+            self.cluster_vars[name] = var
+            label = name
+            if not st.reachable:
+                label += "  (unreachable)"
+            ctk.CTkCheckBox(cluster_box, text=label, variable=var).pack(anchor="w", padx=6, pady=2)
+
+        cluster_btns = ctk.CTkFrame(frame, fg_color="transparent")
+        cluster_btns.pack(fill="x", padx=12, pady=(0, 10))
+        ctk.CTkButton(
+            cluster_btns, text="All", width=60, height=24,
+            fg_color="transparent", border_width=1,
+            command=lambda: [v.set(True) for v in self.cluster_vars.values()],
+        ).pack(side="left", padx=(0, 4))
+        ctk.CTkButton(
+            cluster_btns, text="None", width=60, height=24,
+            fg_color="transparent", border_width=1,
+            command=lambda: [v.set(False) for v in self.cluster_vars.values()],
+        ).pack(side="left")
+
+        # --- Sections ---
+        ctk.CTkLabel(
+            frame, text="Diagnostic sections", font=ctk.CTkFont(size=13, weight="bold")
+        ).pack(anchor="w", padx=12, pady=(6, 2))
+
+        section_box = ctk.CTkFrame(frame, fg_color=("#f3f4f6", "#1f2937"))
+        section_box.pack(fill="x", padx=12, pady=(0, 4))
+        self.section_vars: dict[str, ctk.BooleanVar] = {}
+        for key, label, default in DIAGNOSTIC_SECTIONS:
+            var = ctk.BooleanVar(value=default)
+            self.section_vars[key] = var
+            ctk.CTkCheckBox(section_box, text=label, variable=var).pack(anchor="w", padx=6, pady=2)
+
+        section_btns = ctk.CTkFrame(frame, fg_color="transparent")
+        section_btns.pack(fill="x", padx=12, pady=(0, 10))
+        ctk.CTkButton(
+            section_btns, text="All", width=60, height=24,
+            fg_color="transparent", border_width=1,
+            command=lambda: [v.set(True) for v in self.section_vars.values()],
+        ).pack(side="left", padx=(0, 4))
+        ctk.CTkButton(
+            section_btns, text="None", width=60, height=24,
+            fg_color="transparent", border_width=1,
+            command=lambda: [v.set(False) for v in self.section_vars.values()],
+        ).pack(side="left")
+
+        # --- Action buttons ---
+        btns = ctk.CTkFrame(frame, fg_color="transparent")
+        btns.pack(fill="x", padx=12, pady=(12, 6))
+
+        # Live, coarse token estimate. Real size depends on cluster shape;
+        # this is a heuristic so users can see relative impact while toggling.
+        # Numbers are approx tokens contributed per (cluster x section).
+        self._SECTION_WEIGHTS = {
+            "health": 60,
+            "pending_tasks": 40,
+            "nodes": 350,        # scales with nodes; dominant chunk
+            "repository": 60,
+            "recoveries": 200,
+            "shards": 250,
+        }
+        self._BASE_PER_CLUSTER = 120  # snapshot stats + headers
+        self._BASE_PROMPT = 200
+
+        self.estimate_label = ctk.CTkLabel(
+            btns, text="", font=ctk.CTkFont(size=11),
+            text_color=("#666", "#94a3b8"),
+        )
+        self.estimate_label.pack(side="left")
+
+        ctk.CTkButton(
+            btns, text="Cancel", width=90, fg_color="#555555",
+            command=self.dialog.destroy,
+        ).pack(side="right", padx=(6, 0))
+        ctk.CTkButton(
+            btns, text="Analyze", width=110, command=self._confirm,
+        ).pack(side="right")
+
+        # Hook all checkboxes to refresh the estimate.
+        for v in list(self.cluster_vars.values()) + list(self.section_vars.values()):
+            v.trace_add("write", lambda *_: self._update_estimate())
+        self._update_estimate()
+
+        self.dialog.lift()
+        self.dialog.focus_force()
+
+    def _update_estimate(self):
+        n_clusters = sum(1 for v in self.cluster_vars.values() if v.get())
+        sec_tokens = sum(
+            self._SECTION_WEIGHTS.get(k, 0)
+            for k, v in self.section_vars.items() if v.get()
+        )
+        per_cluster = self._BASE_PER_CLUSTER + sec_tokens
+        total = self._BASE_PROMPT + n_clusters * per_cluster
+        self.estimate_label.configure(
+            text=f"Estimate: ~{total:,} tokens  ({n_clusters} cluster(s))"
+        )
+
+    def _confirm(self):
+        clusters = {n for n, v in self.cluster_vars.items() if v.get()}
+        sections = {k for k, v in self.section_vars.items() if v.get()}
+        if not clusters:
+            return  # silently no-op; user can flip a checkbox
+        self.dialog.destroy()
+        self.on_confirm(clusters, sections)
+
+
 class AnalysisDialog:
     """Display AI analysis output in a scrollable window."""
 
