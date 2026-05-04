@@ -113,7 +113,13 @@ def fetch_cluster_status(config: ClusterConfig, password: str) -> ClusterStatus:
                 config_repo_for_status = config.snapshot_repo
 
             if snapshots:
-                snap = snapshots[0]
+                snap = _select_snapshot(snapshots)
+                if snap is None:
+                    snap = snapshots[0]
+                # /_status includes the actual repository per snapshot.
+                running_repo = snap.get("repository")
+                if running_repo:
+                    config_repo_for_status = running_repo
                 status.snapshot_info = _parse_snapshot(snap)
                 status.snapshot_stats = _extract_stats(snap)
 
@@ -156,6 +162,32 @@ def fetch_cluster_status(config: ClusterConfig, password: str) -> ClusterStatus:
         pass  # SLM is optional info
 
     return status
+
+
+def _select_snapshot(snapshots: list[dict]) -> Optional[dict]:
+    """Pick the best snapshot candidate from a payload.
+
+    Preference:
+    1) running snapshots (STARTED/IN_PROGRESS),
+    2) newest start time.
+    """
+    if not snapshots:
+        return None
+
+    def _is_running(s: dict) -> bool:
+        return (s.get("state") or "").upper() in ("STARTED", "IN_PROGRESS")
+
+    def _start_ms(s: dict) -> int:
+        stats = s.get("stats") or {}
+        v = stats.get("start_time_in_millis") or s.get("start_time_in_millis") or 0
+        try:
+            return int(v)
+        except Exception:
+            return 0
+
+    running = [s for s in snapshots if _is_running(s)]
+    pool = running if running else snapshots
+    return max(pool, key=_start_ms)
 
 
 def _parse_snapshot(raw: dict) -> SnapshotInfo:
