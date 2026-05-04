@@ -10,6 +10,6 @@ name: elastic.emea-prod-1.wtg.zone snapsrepo: de1s3-b1.wtg.ws-us2-production pol
 
 
 
-credentials: zac/mayhem
+credentials: provide your own at runtime via the GUI
 
 

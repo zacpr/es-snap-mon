@@ -19,7 +19,7 @@ DEFAULT_PRESETS = [
         host="https://elastic.apac-prod-1.wtg.zone",
         snapshot_repo="au2s3-b1.wtg.ws-us2-production",
         slm_policy="slm_apac-prod-1-qid-full-backup-to-s3",
-        username="zac",
+        username="elastic",
         verify_ssl=True,
     ),
     ClusterConfig(
@@ -27,7 +27,7 @@ DEFAULT_PRESETS = [
         host="https://elastic.amer-prod-1.wtg.zone",
         snapshot_repo="us2s3-b1.wtg.ws-us2-production",
         slm_policy="slm_amer-prod-1-qid-full-backup-to-s3",
-        username="zac",
+        username="elastic",
         verify_ssl=True,
     ),
     ClusterConfig(
@@ -35,7 +35,7 @@ DEFAULT_PRESETS = [
         host="https://elastic.emea-prod-1.wtg.zone",
         snapshot_repo="de1s3-b1.wtg.ws-us2-production",
         slm_policy="slm_emea-prod-1-qid-full-backup-to-s3",
-        username="zac",
+        username="elastic",
         verify_ssl=True,
     ),
 ]

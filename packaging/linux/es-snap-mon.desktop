@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=ES Snapshot Monitor
+Comment=Monitor Elasticsearch snapshot progress
+Exec=/opt/es-snap-mon/es-snap-mon
+Icon=es-snap-mon
+Terminal=false
+Categories=Development;Monitor;

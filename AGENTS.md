@@ -15,7 +15,7 @@ The project directory currently contains only `thePLAN.md`, which describes the 
 | `elastic.amer-prod-1.wtg.zone` | `us2s3-b1.wtg.ws-us2-production` | `slm_amer-prod-1-qid-full-backup-to-s3` |
 | `elastic.emea-prod-1.wtg.zone` | `de1s3-b1.wtg.ws-us2-production` | `slm_emea-prod-1-qid-full-backup-to-s3` |
 
-**Test credentials:** `zac` / `mayhem`
+**Test credentials:** provided by the user at runtime; never commit credentials.
 
 ## Technology Stack (to be decided)
 
@@ -60,7 +60,7 @@ Until a stack is chosen, no directory structure exists. A typical layout once de
 
 ## Security Considerations
 
-- **Do not commit credentials.** The test credentials (`zac/mayhem`) listed in `thePLAN.md` must never be hard-coded in source.
+- **Do not commit credentials.** Cluster passwords must never be hard-coded in source.
 - Use OS-native secret storage (e.g., keyring, Keychain, Windows Credential Manager) or environment variables for cluster passwords/API keys.
 - Validate TLS certificates when connecting to production clusters.
 - Consider least-privilege Elasticsearch users (e.g., `monitor` + `snapshot` roles only).

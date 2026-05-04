@@ -1,0 +1,140 @@
+name: Build Installers
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  # ---------------------------------------------------------------
+  # Windows: PyInstaller -> Inno Setup installer (.exe)
+  # ---------------------------------------------------------------
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          pip install -e .
+
+      - name: Build with PyInstaller
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --windowed --name "ESSnapMon" `
+            --collect-all customtkinter `
+            --collect-submodules keyring.backends `
+            src/es_snap_mon/__main__.py
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging/windows/installer.iss
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ESSnapMon-windows-installer
+          path: packaging/windows/Output/*.exe
+
+  # ---------------------------------------------------------------
+  # Linux: PyInstaller -> fpm -> .deb + .rpm
+  # ---------------------------------------------------------------
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm ruby ruby-dev build-essential \
+            python3-tk libgirepository1.0-dev
+          sudo gem install --no-document fpm
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          pip install -e .
+
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller --noconfirm --name es-snap-mon \
+            --collect-all customtkinter \
+            --collect-submodules keyring.backends \
+            src/es_snap_mon/__main__.py
+
+      - name: Stage payload
+        run: |
+          mkdir -p staging/opt/es-snap-mon
+          cp -r dist/es-snap-mon/. staging/opt/es-snap-mon/
+          mkdir -p staging/usr/bin
+          ln -s /opt/es-snap-mon/es-snap-mon staging/usr/bin/es-snap-mon
+          mkdir -p staging/usr/share/applications
+          cp packaging/linux/es-snap-mon.desktop staging/usr/share/applications/
+
+      - name: Read version
+        id: ver
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          [ -z "$v" ] && v="0.0.0"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Build .deb
+        run: |
+          fpm -s dir -t deb -n es-snap-mon -v "${{ steps.ver.outputs.version }}" \
+            --description "Elasticsearch Snapshot Monitor GUI" \
+            --license "MIT" --maintainer "es-snap-mon" \
+            --depends "python3-tk" \
+            -C staging .
+
+      - name: Build .rpm
+        run: |
+          fpm -s dir -t rpm -n es-snap-mon -v "${{ steps.ver.outputs.version }}" \
+            --description "Elasticsearch Snapshot Monitor GUI" \
+            --license "MIT" --maintainer "es-snap-mon" \
+            --depends "python3-tkinter" \
+            -C staging .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ESSnapMon-linux-packages
+          path: |
+            *.deb
+            *.rpm
+
+  # ---------------------------------------------------------------
+  # Publish to GitHub Releases (only on tag push)
+  # ---------------------------------------------------------------
+  release:
+    needs: [windows, linux]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/ESSnapMon-windows-installer/*.exe
+            artifacts/ESSnapMon-linux-packages/*.deb
+            artifacts/ESSnapMon-linux-packages/*.rpm
+          generate_release_notes: true
