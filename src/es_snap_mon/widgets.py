@@ -1,12 +1,67 @@
 """Custom UI widgets for the ES Snapshot Monitor."""
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 import threading
 import tkinter as tk
+import webbrowser
 
 import customtkinter as ctk
 
 from .models import ClusterStatus, SnapshotState
+
+
+def _clean_env() -> dict:
+    """Return an env dict safe for spawning system GUI tools.
+
+    PyInstaller injects LD_LIBRARY_PATH (Linux) and DYLD_LIBRARY_PATH
+    (macOS) pointing at its bundled libs (libssl, libcrypto, etc.).
+    Those break system commands like kde-open, xdg-open, gio open, etc.
+    Strip those vars and restore the originals captured at startup.
+    """
+    env = os.environ.copy()
+    for key in (
+        "LD_LIBRARY_PATH",
+        "LD_PRELOAD",
+        "DYLD_LIBRARY_PATH",
+        "DYLD_INSERT_LIBRARIES",
+        "PYTHONPATH",
+        "PYTHONHOME",
+    ):
+        orig = env.get(f"{key}_ORIG")
+        if orig is not None:
+            env[key] = orig
+        else:
+            env.pop(key, None)
+    return env
+
+
+def _open_url(url: str) -> bool:
+    """Open a URL in the user's browser, robust to PyInstaller envs."""
+    # Linux: prefer xdg-open / kde-open / gio with a sanitized environment.
+    if sys.platform.startswith("linux"):
+        env = _clean_env()
+        for cmd in (["xdg-open", url], ["gio", "open", url], ["kde-open", url], ["kde-open5", url]):
+            try:
+                subprocess.Popen(
+                    cmd,
+                    env=env,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+                return True
+            except FileNotFoundError:
+                continue
+            except Exception:
+                continue
+        # Fall through to webbrowser as a last resort
+    try:
+        return bool(webbrowser.open(url, new=2))
+    except Exception:
+        return False
 
 
 class GradientProgressBar(ctk.CTkFrame):
@@ -785,15 +840,22 @@ class AISettingsDialog:
         self.dialog.grab_set()
 
     def _open_github_tokens(self):
-        import webbrowser
-        try:
-            webbrowser.open(self.GITHUB_TOKEN_URL, new=2)
+        if _open_url(self.GITHUB_TOKEN_URL):
             self.status_label.configure(
                 text="Opened browser. Generate a token, copy it, then paste it below.",
                 text_color="#3498db",
             )
-        except Exception as e:
-            self.status_label.configure(text=f"Could not open browser: {e}", text_color="#e74c3c")
+        else:
+            # Fallback: copy URL so the user can paste into a browser manually.
+            try:
+                self.dialog.clipboard_clear()
+                self.dialog.clipboard_append(self.GITHUB_TOKEN_URL)
+                self.status_label.configure(
+                    text="Could not open browser. URL copied to clipboard — paste it into your browser.",
+                    text_color="#f39c12",
+                )
+            except Exception as e:
+                self.status_label.configure(text=f"Could not open browser: {e}", text_color="#e74c3c")
 
     def _paste_clipboard(self):
         try:
