@@ -384,6 +384,8 @@ class App(ctk.CTk):
 
     def _run_analysis(self, dlg):
         import json
+        import sys
+        import traceback
         from .ai_client import analyze, load_ai_settings
 
         # 1. Collect diagnostics for every reachable cluster (in parallel).
@@ -404,6 +406,8 @@ class App(ctk.CTk):
             try:
                 diag = fetch_diagnostics(status.config, pwd)
             except Exception as e:
+                print(f"[es-snap-mon] diagnostics error for {status.config.name}: {e}", file=sys.stderr)
+                traceback.print_exc()
                 diag = {"_error": str(e)}
             with lock:
                 results[status.config.name] = diag
@@ -423,7 +427,23 @@ class App(ctk.CTk):
         ))
 
         # 3. Build prompt (snapshot stats + diagnostics) and send.
-        prompt = self._build_analysis_prompt(diagnostics)
+        try:
+            prompt = self._build_analysis_prompt(diagnostics)
+        except Exception as e:
+            print("[es-snap-mon] failed to build analysis prompt:", e, file=sys.stderr)
+            traceback.print_exc()
+            self.after(0, lambda: dlg.set_error(
+                f"Failed to build analysis prompt: {e}\n\n"
+                "Diagnostics collected:\n"
+                + json.dumps(diagnostics, indent=2, default=str)[:2000]
+            ))
+            return
+
+        # Cap prompt size — GitHub Models has token limits.
+        if len(prompt) > 60000:
+            print(f"[es-snap-mon] truncating prompt {len(prompt)} -> 60000", file=sys.stderr)
+            prompt = prompt[:60000] + "\n\n... (truncated)"
+
         try:
             reply = analyze(
                 prompt,
@@ -442,7 +462,20 @@ class App(ctk.CTk):
                 ),
             )
         except Exception as e:
-            self.after(0, lambda: dlg.set_error(str(e)))
+            print("[es-snap-mon] AI request failed:", e, file=sys.stderr)
+            traceback.print_exc()
+            err_msg = (
+                f"{e}\n\n"
+                f"Endpoint: {load_ai_settings().base_url}\n"
+                f"Model: {load_ai_settings().model}\n"
+                f"Prompt size: {len(prompt):,} chars\n\n"
+                "Tips:\n"
+                " • 401/403 — token missing the 'Models' permission, or expired.\n"
+                " • 404 model_not_found — try a different model in AI Settings (e.g. openai/gpt-4o-mini).\n"
+                " • 413/context length — prompt too large; fewer clusters or shorter run.\n"
+                " • Connection errors — check network / proxy."
+            )
+            self.after(0, lambda m=err_msg: dlg.set_error(m))
             return
 
         model = load_ai_settings().model

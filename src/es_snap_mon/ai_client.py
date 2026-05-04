@@ -64,14 +64,14 @@ def set_ai_token(token: str) -> None:
     keyring.set_password(_APP_NAME, _AI_KEY, token)
 
 
-def analyze(prompt: str, system: str = "", timeout: int = 60) -> str:
+def analyze(prompt: str, system: str = "", timeout: int = 120) -> str:
     """Send a chat completion request and return the assistant's text."""
     settings = load_ai_settings()
     token = get_ai_token()
     if not token:
         raise RuntimeError(
             "No API token configured. Open AI Settings and paste a GitHub PAT "
-            "(scope: models:read) or any OpenAI-compatible API key."
+            "(fine-grained, with the 'Models' permission — read-only)."
         )
 
     url = settings.base_url.rstrip("/") + "/chat/completions"
@@ -91,7 +91,10 @@ def analyze(prompt: str, system: str = "", timeout: int = 60) -> str:
         "Accept": "application/json",
     }
 
-    resp = requests.post(url, json=payload, headers=headers, timeout=timeout)
+    try:
+        resp = requests.post(url, json=payload, headers=headers, timeout=timeout)
+    except requests.RequestException as e:
+        raise RuntimeError(f"Network error talking to {url}: {e}") from e
     if resp.status_code >= 400:
         # Try to surface a useful error
         try:
@@ -99,10 +102,13 @@ def analyze(prompt: str, system: str = "", timeout: int = 60) -> str:
             msg = err.get("error", {}).get("message") or err.get("message") or resp.text
         except Exception:
             msg = resp.text
-        raise RuntimeError(f"HTTP {resp.status_code}: {msg[:400]}")
+        raise RuntimeError(f"HTTP {resp.status_code}: {msg[:600]}")
 
-    data = resp.json()
+    try:
+        data = resp.json()
+    except Exception as e:
+        raise RuntimeError(f"Non-JSON response: {resp.text[:400]}") from e
     try:
         return data["choices"][0]["message"]["content"]
-    except (KeyError, IndexError) as e:
-        raise RuntimeError(f"Unexpected response shape: {data!r}") from e
+    except (KeyError, IndexError, TypeError) as e:
+        raise RuntimeError(f"Unexpected response shape: {str(data)[:600]}") from e
