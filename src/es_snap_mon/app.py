@@ -58,6 +58,7 @@ class App(ctk.CTk):
         self._auto_refresh = True
         self._refreshing = False
         self._scenic_mode = True
+        self._parallax_test_mode = "auto"  # auto | normal | stampede
         self._last_poll: dict[str, tuple[float, int, int]] = {}  # (time, bytes, shards)
         self._speed_history: dict[str, list[tuple[float, float]]] = {}  # name -> [(time, bps), ...]
         self._shard_rate_history: dict[str, list[tuple[float, float]]] = {}  # name -> [(time, shards/sec), ...]
@@ -69,6 +70,8 @@ class App(ctk.CTk):
         self.deiconify()
         self.update()
         self.minsize(900, 600)
+        # Secret test hotkey: Ctrl+Shift+P cycles auto/normal/stampede.
+        self.bind_all("<Control-Shift-P>", self._cycle_parallax_test_mode)
         self.lift()
         # Trigger first refresh shortly after window shows
         self.after(800, self._trigger_refresh)
@@ -212,6 +215,18 @@ class App(ctk.CTk):
         self._scenic_mode = self.scenic_var.get()
         self._render_cards()
 
+    def _cycle_parallax_test_mode(self, _event=None):
+        modes = ["auto", "normal", "stampede"]
+        idx = modes.index(self._parallax_test_mode)
+        self._parallax_test_mode = modes[(idx + 1) % len(modes)]
+        label = {
+            "auto": "Parallax test: AUTO",
+            "normal": "Parallax test: FORCED NORMAL",
+            "stampede": "Parallax test: FORCED STAMPEDE",
+        }[self._parallax_test_mode]
+        self.status_label.configure(text=label)
+        self._render_cards()
+
     def _schedule_refresh(self, delay: float):
         self._cancel_refresh()
         if self._auto_refresh or delay < 1:
@@ -322,6 +337,10 @@ class App(ctk.CTk):
             s.snapshot_info is not None and s.snapshot_info.state == SnapshotState.IN_PROGRESS
             for s in self.cluster_statuses
         )
+        if self._parallax_test_mode == "normal":
+            all_active = False
+        elif self._parallax_test_mode == "stampede":
+            all_active = True
 
         # Empty state
         if not self.cluster_statuses:
