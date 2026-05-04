@@ -282,10 +282,11 @@ class MiniSparkline(ctk.CTkFrame):
 class ParallaxStrip(ctk.CTkFrame):
     """Tiny animated scenery strip to add motion above the sparkline."""
 
-    def __init__(self, master, height: int = 30, pace: float = 1.0, **kwargs):
+    def __init__(self, master, height: int = 30, pace: float = 1.0, frenzy: bool = False, **kwargs):
         super().__init__(master, height=height, **kwargs)
         self._h = height
         self._pace = max(0.6, min(pace, 2.2))
+        self._frenzy = frenzy
         self._running = True
         self._after_id = None
         self._sprites: list[dict] = []
@@ -301,9 +302,11 @@ class ParallaxStrip(ctk.CTkFrame):
         self.bind("<Destroy>", self._on_destroy)
 
         # Seed a few moving silhouettes in two layers.
-        for _ in range(4):
+        near_count = 8 if frenzy else 4
+        far_count = 6 if frenzy else 3
+        for _ in range(near_count):
             self._sprites.append(self._new_sprite(layer=0, seed_x=None))
-        for _ in range(3):
+        for _ in range(far_count):
             self._sprites.append(self._new_sprite(layer=1, seed_x=None))
 
         self.after(80, self._start)
@@ -372,7 +375,10 @@ class ParallaxStrip(ctk.CTkFrame):
             speed = random.uniform(0.25, 0.5) * self._pace
             scale = random.uniform(0.65, 0.95)
             color = "#102338"
-        kind = random.choice(["tree", "tree", "deer", "deer", "boar"])
+        if self._frenzy:
+            kind = random.choice(["tree", "tree", "deer", "deer", "boar", "boar", "ufo", "comet"])
+        else:
+            kind = random.choice(["tree", "tree", "deer", "deer", "boar"])
         return {"x": x, "y": y, "speed": speed, "scale": scale, "kind": kind, "color": color}
 
     def _draw_tree(self, x: float, y: float, s: float, color: str):
@@ -399,6 +405,15 @@ class ParallaxStrip(ctk.CTkFrame):
         for lx in (-2.5, -0.8, 0.9, 2.4):
             self._canvas.create_line(x + lx * s, y - 1.2 * s, x + lx * s, y, fill=color, width=max(1, int(s)), tags="sprite")
 
+    def _draw_ufo(self, x: float, y: float, s: float):
+        self._canvas.create_oval(x - 5 * s, y - 6 * s, x + 5 * s, y - 3.2 * s, fill="#94a3b8", outline="", tags="sprite")
+        self._canvas.create_oval(x - 2.5 * s, y - 7.5 * s, x + 2.5 * s, y - 5.0 * s, fill="#cbd5e1", outline="", tags="sprite")
+        self._canvas.create_line(x, y - 3.2 * s, x, y, fill="#38bdf8", width=1, tags="sprite")
+
+    def _draw_comet(self, x: float, y: float, s: float):
+        self._canvas.create_line(x - 8 * s, y - 7 * s, x + 1 * s, y - 2 * s, fill="#93c5fd", width=1, tags="sprite")
+        self._canvas.create_oval(x, y - 3 * s, x + 2.2 * s, y - 1 * s, fill="#e2e8f0", outline="", tags="sprite")
+
     def _tick(self):
         if not self._running or not self.winfo_exists():
             return
@@ -417,6 +432,10 @@ class ParallaxStrip(ctk.CTkFrame):
                 self._draw_tree(sp["x"], sp["y"], sp["scale"], sp["color"])
             elif sp["kind"] == "deer":
                 self._draw_deer(sp["x"], sp["y"], sp["scale"], sp["color"])
+            elif sp["kind"] == "ufo":
+                self._draw_ufo(sp["x"], sp["y"], sp["scale"])
+            elif sp["kind"] == "comet":
+                self._draw_comet(sp["x"], sp["y"], sp["scale"])
             else:
                 self._draw_boar(sp["x"], sp["y"], sp["scale"], sp["color"])
 
@@ -441,6 +460,7 @@ class ClusterCard(ctk.CTkFrame):
         status: ClusterStatus,
         speed_history=None,
         scenic_mode: bool = True,
+        frenzy_mode: bool = False,
         on_remove=None,
         on_edit=None,
         on_toggle_ssl=None,
@@ -449,17 +469,26 @@ class ClusterCard(ctk.CTkFrame):
         self.status = status
         self.speed_history = speed_history or []
         self.scenic_mode = scenic_mode
+        self.frenzy_mode = frenzy_mode
         self.on_remove = on_remove
         self.on_edit = on_edit
         self.on_toggle_ssl = on_toggle_ssl
         self._build()
 
-    def refresh(self, status: ClusterStatus, speed_history=None, scenic_mode: bool | None = None):
+    def refresh(
+        self,
+        status: ClusterStatus,
+        speed_history=None,
+        scenic_mode: bool | None = None,
+        frenzy_mode: bool | None = None,
+    ):
         """Update this card in-place with new data, no card-frame churn."""
         self.status = status
         self.speed_history = speed_history or []
         if scenic_mode is not None:
             self.scenic_mode = scenic_mode
+        if frenzy_mode is not None:
+            self.frenzy_mode = frenzy_mode
         for child in self.winfo_children():
             child.destroy()
         self._build()
@@ -656,7 +685,12 @@ class ClusterCard(ctk.CTkFrame):
                     pace = 1.0
                     if stats and getattr(stats, "window_avg_speed_bps", 0) > 0:
                         pace = min(2.0, 0.9 + (stats.window_avg_speed_bps / (140 * 1024 * 1024)))
-                    ParallaxStrip(graph_frame, height=30, pace=pace).pack(fill="x", pady=(0, 2))
+                    ParallaxStrip(
+                        graph_frame,
+                        height=30,
+                        pace=pace,
+                        frenzy=self.frenzy_mode,
+                    ).pack(fill="x", pady=(0, 2))
                 MiniSparkline(graph_frame, data=self.speed_history, height=50).pack(fill="x")
 
             # Stats grid

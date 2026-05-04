@@ -9,7 +9,7 @@ import customtkinter as ctk
 
 from .config_manager import load_clusters, remove_cluster, get_password, load_presets, toggle_ssl_verify
 from .es_client import fetch_cluster_status, fetch_diagnostics
-from .models import ClusterStatus
+from .models import ClusterStatus, SnapshotState
 from .widgets import ClusterCard, AddClusterDialog, AISettingsDialog, AnalysisDialog, AnalysisScopeDialog
 
 
@@ -318,6 +318,11 @@ class App(ctk.CTk):
         # Reuse existing card widgets; only refresh content for clusters whose
         # data actually changed. Add cards for new clusters, remove stale ones.
 
+        all_active = bool(self.cluster_statuses) and all(
+            s.snapshot_info is not None and s.snapshot_info.state == SnapshotState.IN_PROGRESS
+            for s in self.cluster_statuses
+        )
+
         # Empty state
         if not self.cluster_statuses:
             for card in self._card_widgets.values():
@@ -351,6 +356,7 @@ class App(ctk.CTk):
                     status=status,
                     speed_history=history,
                     scenic_mode=self._scenic_mode,
+                    frenzy_mode=all_active,
                     on_remove=lambda n=name: self._confirm_remove(n),
                     on_edit=lambda s=status: self._open_edit_dialog(s),
                 )
@@ -359,7 +365,12 @@ class App(ctk.CTk):
                 # Keep callbacks bound to the latest status object
                 card.on_edit = lambda s=status: self._open_edit_dialog(s)
                 card.on_remove = lambda n=name: self._confirm_remove(n)
-                card.refresh(status, history, scenic_mode=self._scenic_mode)
+                card.refresh(
+                    status,
+                    history,
+                    scenic_mode=self._scenic_mode,
+                    frenzy_mode=all_active,
+                )
             card.grid(row=i, column=0, sticky="ew", padx=8, pady=6)
 
         # Remove cards for clusters that no longer exist
