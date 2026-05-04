@@ -498,8 +498,8 @@ class AddClusterDialog:
 
         self.dialog = tk.Toplevel(master)
         self.dialog.title("Edit Cluster" if existing else "Add Cluster")
-        self.dialog.geometry("520x540")
-        self.dialog.resizable(False, False)
+        self.dialog.geometry("520x680")
+        self.dialog.minsize(520, 600)
         self.dialog.transient(master)
         self.dialog.configure(bg="#2b2b2b")
 
@@ -653,6 +653,13 @@ class AddClusterDialog:
             verify_ssl=bool(self.ssl_var.get()),
             ca_cert=ca_cert,
         )
-        save_cluster(cfg, pwd)
-        self.on_save()
-        self.dialog.destroy()
+        try:
+            save_cluster(cfg, pwd)
+        except Exception as e:
+            self.test_label.configure(text=f"Save failed: {e}", text_color="#e74c3c")
+            return
+        self.test_label.configure(text="Saved", text_color="#2ecc71")
+        try:
+            self.on_save()
+        finally:
+            self.dialog.after(250, self.dialog.destroy)
