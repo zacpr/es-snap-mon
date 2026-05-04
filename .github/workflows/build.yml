@@ -31,7 +31,12 @@ jobs:
         run: |
           pyinstaller --noconfirm --windowed --name "ESSnapMon" `
             --paths src `
-            --collect-submodules es_snap_mon `
+            --hidden-import es_snap_mon `
+            --hidden-import es_snap_mon.app `
+            --hidden-import es_snap_mon.widgets `
+            --hidden-import es_snap_mon.es_client `
+            --hidden-import es_snap_mon.config_manager `
+            --hidden-import es_snap_mon.models `
             --collect-all customtkinter `
             --collect-submodules keyring.backends `
             --add-data "src/es_snap_mon/data/ca.pem;es_snap_mon/data" `
@@ -77,7 +82,12 @@ jobs:
         run: |
           pyinstaller --noconfirm --name es-snap-mon \
             --paths src \
-            --collect-submodules es_snap_mon \
+            --hidden-import es_snap_mon \
+            --hidden-import es_snap_mon.app \
+            --hidden-import es_snap_mon.widgets \
+            --hidden-import es_snap_mon.es_client \
+            --hidden-import es_snap_mon.config_manager \
+            --hidden-import es_snap_mon.models \
             --collect-all customtkinter \
             --collect-submodules keyring.backends \
             --add-data "src/es_snap_mon/data/ca.pem:es_snap_mon/data" \
