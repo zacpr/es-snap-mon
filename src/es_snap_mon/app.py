@@ -182,6 +182,7 @@ class App(ctk.CTk):
         # rebuild a card's contents when its data changes, instead of tearing
         # down and rebuilding every card frame on every refresh.
         self._card_widgets: dict[str, ClusterCard] = {}
+        self._card_fingerprints: dict[str, tuple] = {}
         self._empty_label: ctk.CTkLabel | None = None
 
         self.spinner = ctk.CTkLabel(
@@ -347,6 +348,7 @@ class App(ctk.CTk):
             for card in self._card_widgets.values():
                 card.destroy()
             self._card_widgets.clear()
+            self._card_fingerprints.clear()
             if self._empty_label is None:
                 self._empty_label = ctk.CTkLabel(
                     self.scroll,
@@ -368,6 +370,7 @@ class App(ctk.CTk):
             name = status.config.name
             seen.add(name)
             history = self._speed_history.get(name, [])
+            fp = self._card_fingerprint(status, history, self._scenic_mode, all_active)
             card = self._card_widgets.get(name)
             if card is None:
                 card = ClusterCard(
@@ -380,22 +383,54 @@ class App(ctk.CTk):
                     on_edit=lambda s=status: self._open_edit_dialog(s),
                 )
                 self._card_widgets[name] = card
+                self._card_fingerprints[name] = fp
             else:
                 # Keep callbacks bound to the latest status object
                 card.on_edit = lambda s=status: self._open_edit_dialog(s)
                 card.on_remove = lambda n=name: self._confirm_remove(n)
-                card.refresh(
-                    status,
-                    history,
-                    scenic_mode=self._scenic_mode,
-                    frenzy_mode=all_active,
-                )
+                if self._card_fingerprints.get(name) != fp:
+                    card.refresh(
+                        status,
+                        history,
+                        scenic_mode=self._scenic_mode,
+                        frenzy_mode=all_active,
+                    )
+                    self._card_fingerprints[name] = fp
             card.grid(row=i, column=0, sticky="ew", padx=8, pady=6)
 
         # Remove cards for clusters that no longer exist
         for stale in [n for n in self._card_widgets if n not in seen]:
             self._card_widgets[stale].destroy()
             del self._card_widgets[stale]
+            self._card_fingerprints.pop(stale, None)
+
+    @staticmethod
+    def _card_fingerprint(status: ClusterStatus, history: list[tuple[float, float]], scenic: bool, frenzy: bool) -> tuple:
+        """Compact signature of fields that materially affect rendered card UI."""
+        s = status.snapshot_info
+        st = status.snapshot_stats
+        hist_tail = tuple(int(v) for _, v in history[-10:])
+        return (
+            status.reachable,
+            status.error_message or "",
+            s.name if s else None,
+            s.state.value if s else None,
+            s.shards_successful if s else None,
+            s.shards_total if s else None,
+            s.shards_failed if s else None,
+            round(st.progress_pct, 2) if st else None,
+            st.processed_files if st else None,
+            st.total_files if st else None,
+            int(st.processed_bytes) if st else None,
+            int(st.total_bytes) if st else None,
+            int(st.current_speed_bps) if st else None,
+            int(st.avg_speed_bps) if st else None,
+            status.slm_last_run or "",
+            status.slm_next_run or "",
+            scenic,
+            frenzy,
+            hist_tail,
+        )
 
     def _open_add_dialog(self):
         AddClusterDialog(self, on_save=self._trigger_refresh)
