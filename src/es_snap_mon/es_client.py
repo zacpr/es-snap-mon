@@ -79,114 +79,105 @@ def fetch_cluster_status(config: ClusterConfig, password: str) -> ClusterStatus:
 
     # 2. Current snapshot
     try:
+        snapshots = []
+        config_repo_for_status = config.snapshot_repo
+
         resp = session.get(
             f"{base}/_snapshot/{config.snapshot_repo}/_current",
             timeout=15,
         )
         if resp.status_code == 200:
             data = resp.json()
-            snapshots = data.get("snapshots", [])
-            # Fallback: if the configured repo has no current snapshot, ask
-            # the cluster for ALL currently-running snapshots (any repo). This
-            # handles cases where the active backup landed in a different
-            # repository than the one configured here.
-            if not snapshots:
+            snapshots = data.get("snapshots", []) or []
+
+        # Fallback: if configured repo has no current snapshot OR the repo call
+        # failed (e.g. wrong repo name), ask cluster-wide status across repos.
+        if not snapshots:
+            try:
+                all_resp = session.get(f"{base}/_snapshot/_status", timeout=20)
+                if all_resp.status_code == 200:
+                    snapshots = all_resp.json().get("snapshots", []) or []
+                    if snapshots:
+                        running_repo = snapshots[0].get("repository")
+                        if running_repo:
+                            config_repo_for_status = running_repo
+            except Exception:
+                pass
+
+        if snapshots:
+            running = [s for s in snapshots if (s.get("state") or "").upper() in ("STARTED", "IN_PROGRESS")]
+            status.active_snapshot_count = len(running)
+            status.active_snapshot_names = [s.get("snapshot", "unknown") for s in running]
+            status.snapshot_jobs = [
+                SnapshotJob(info=_parse_snapshot(s), stats=_extract_stats(s))
+                for s in running
+            ]
+
+            # Try to enrich each running job with a direct _status call so
+            # concurrent snapshots have equally rich byte/file telemetry.
+            for job, raw in zip(status.snapshot_jobs, running):
                 try:
-                    all_resp = session.get(f"{base}/_snapshot/_status", timeout=20)
-                    if all_resp.status_code == 200:
-                        snapshots = all_resp.json().get("snapshots", []) or []
-                        if snapshots:
-                            # Use the running snapshot's actual repo for any
-                            # follow-up _status call below.
-                            running_repo = snapshots[0].get("repository")
-                            if running_repo and running_repo != config.snapshot_repo:
-                                # Stash so the rest of the code uses it.
-                                config_repo_for_status = running_repo
-                            else:
-                                config_repo_for_status = config.snapshot_repo
-                        else:
-                            config_repo_for_status = config.snapshot_repo
-                    else:
-                        config_repo_for_status = config.snapshot_repo
+                    repo_for_job = raw.get("repository") or config.snapshot_repo
+                    j_resp = session.get(
+                        f"{base}/_snapshot/{repo_for_job}/{job.info.name}/_status",
+                        timeout=15,
+                    )
+                    if j_resp.status_code == 200:
+                        j_data = j_resp.json().get("snapshots", [])
+                        if j_data:
+                            job.stats = _extract_stats(j_data[0])
+                            job.info = _merge_shard_stats(job.info, j_data[0])
                 except Exception:
-                    config_repo_for_status = config.snapshot_repo
-            else:
-                config_repo_for_status = config.snapshot_repo
+                    # Best-effort only; keep whatever _current/_status-all gave us.
+                    pass
 
-            if snapshots:
-                running = [s for s in snapshots if (s.get("state") or "").upper() in ("STARTED", "IN_PROGRESS")]
-                status.active_snapshot_count = len(running)
-                status.active_snapshot_names = [s.get("snapshot", "unknown") for s in running]
-                status.snapshot_jobs = [
-                    SnapshotJob(info=_parse_snapshot(s), stats=_extract_stats(s))
-                    for s in running
-                ]
+            snap = _select_snapshot(snapshots)
+            if snap is None:
+                snap = snapshots[0]
+            # /_status includes the actual repository per snapshot.
+            running_repo = snap.get("repository")
+            if running_repo:
+                config_repo_for_status = running_repo
+            status.snapshot_info = _parse_snapshot(snap)
+            status.snapshot_stats = _extract_stats(snap)
 
-                # Try to enrich each running job with a direct _status call so
-                # concurrent snapshots have equally rich byte/file telemetry.
-                for job, raw in zip(status.snapshot_jobs, running):
-                    try:
-                        repo_for_job = raw.get("repository") or config.snapshot_repo
-                        j_resp = session.get(
-                            f"{base}/_snapshot/{repo_for_job}/{job.info.name}/_status",
-                            timeout=15,
-                        )
-                        if j_resp.status_code == 200:
-                            j_data = j_resp.json().get("snapshots", [])
-                            if j_data:
-                                job.stats = _extract_stats(j_data[0])
-                                job.info = _merge_shard_stats(job.info, j_data[0])
-                    except Exception:
-                        # Best-effort only; keep whatever _current/_status-all gave us.
-                        pass
+            # _current is light on stats; call _status for byte-level detail
+            # while a snapshot is actually running.
+            if status.snapshot_info.state == SnapshotState.IN_PROGRESS:
+                try:
+                    snap_name = status.snapshot_info.name
+                    s_resp = session.get(
+                        f"{base}/_snapshot/{config_repo_for_status}/{snap_name}/_status",
+                        timeout=20,
+                    )
+                    if s_resp.status_code == 200:
+                        s_data = s_resp.json().get("snapshots", [])
+                        if s_data:
+                            status.snapshot_stats = _extract_stats(s_data[0])
+                            # Refresh shard counts from the richer status payload
+                            status.snapshot_info = _merge_shard_stats(
+                                status.snapshot_info, s_data[0]
+                            )
+                            # Keep the selected primary snapshot in sync
+                            # with the richer /_status response.
+                            if status.snapshot_jobs:
+                                primary_name = status.snapshot_info.name
+                                for job in status.snapshot_jobs:
+                                    if job.info.name == primary_name:
+                                        job.stats = status.snapshot_stats
+                                        job.info = _merge_shard_stats(job.info, s_data[0])
+                                        break
+                except Exception:
+                    pass  # Fall back to whatever _current gave us
 
-                snap = _select_snapshot(snapshots)
-                if snap is None:
-                    snap = snapshots[0]
-                # /_status includes the actual repository per snapshot.
-                running_repo = snap.get("repository")
-                if running_repo:
-                    config_repo_for_status = running_repo
-                status.snapshot_info = _parse_snapshot(snap)
-                status.snapshot_stats = _extract_stats(snap)
-
-                # _current is light on stats; call _status for byte-level detail
-                # while a snapshot is actually running.
-                if status.snapshot_info.state == SnapshotState.IN_PROGRESS:
-                    try:
-                        snap_name = status.snapshot_info.name
-                        s_resp = session.get(
-                            f"{base}/_snapshot/{config_repo_for_status}/{snap_name}/_status",
-                            timeout=20,
-                        )
-                        if s_resp.status_code == 200:
-                            s_data = s_resp.json().get("snapshots", [])
-                            if s_data:
-                                status.snapshot_stats = _extract_stats(s_data[0])
-                                # Refresh shard counts from the richer status payload
-                                status.snapshot_info = _merge_shard_stats(
-                                    status.snapshot_info, s_data[0]
-                                )
-                                # Keep the selected primary snapshot in sync
-                                # with the richer /_status response.
-                                if status.snapshot_jobs:
-                                    primary_name = status.snapshot_info.name
-                                    for job in status.snapshot_jobs:
-                                        if job.info.name == primary_name:
-                                            job.stats = status.snapshot_stats
-                                            job.info = _merge_shard_stats(job.info, s_data[0])
-                                            break
-                    except Exception:
-                        pass  # Fall back to whatever _current gave us
-
-                # If the selected primary snapshot exists in the per-job list,
-                # use the per-job enriched values as the source of truth.
-                if status.snapshot_jobs and status.snapshot_info is not None:
-                    for job in status.snapshot_jobs:
-                        if job.info.name == status.snapshot_info.name:
-                            status.snapshot_info = job.info
-                            status.snapshot_stats = job.stats
-                            break
+            # If the selected primary snapshot exists in the per-job list,
+            # use the per-job enriched values as the source of truth.
+            if status.snapshot_jobs and status.snapshot_info is not None:
+                for job in status.snapshot_jobs:
+                    if job.info.name == status.snapshot_info.name:
+                        status.snapshot_info = job.info
+                        status.snapshot_stats = job.stats
+                        break
     except Exception as exc:
         status.error_message = f"Snapshot query failed: {exc}"
 
