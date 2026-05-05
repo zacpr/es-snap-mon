@@ -264,6 +264,7 @@ def _parse_snapshot(raw: dict) -> SnapshotInfo:
         shards_total=shards_block.get("total", 0),
         shards_failed=shards_block.get("failed", 0),
         shards_successful=shards_block.get("done", shards_block.get("successful", 0)),
+        repository=raw.get("repository"),
     )
 
 
@@ -275,6 +276,8 @@ def _merge_shard_stats(info: SnapshotInfo, status_raw: dict) -> SnapshotInfo:
     info.shards_successful = shards_block.get(
         "done", shards_block.get("successful", info.shards_successful)
     )
+    info.indices_count = max(info.indices_count, len(status_raw.get("indices", [])))
+    info.repository = status_raw.get("repository") or info.repository
     return info
 
 

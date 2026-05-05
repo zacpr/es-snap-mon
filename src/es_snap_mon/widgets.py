@@ -525,6 +525,7 @@ class ClusterCard(ctk.CTkFrame):
         self._slm_last_label = None
         self._slm_next_label = None
         self._slm_running_label = None
+        self._repo_label = None
         self._render_scenic_mode = scenic_mode
         self._render_frenzy_mode = frenzy_mode
         self._render_parallax_intensity = parallax_intensity
@@ -596,6 +597,12 @@ class ClusterCard(ctk.CTkFrame):
         if self._state_badge_label is not None:
             self._state_badge_label.configure(text=snap.state.value)
 
+        if self._repo_label is not None:
+            repo_text = f"Repo: {snap.repository}" if snap.repository else "Repo: —"
+            if snap.indices_count > 0:
+                repo_text += f"   •   Indices: {snap.indices_count:,}"
+            self._repo_label.configure(text=repo_text)
+
         if self._name_widget is not None:
             try:
                 self._name_widget.configure(state="normal")
@@ -623,6 +630,7 @@ class ClusterCard(ctk.CTkFrame):
         self._set_stat("Speed", stats.current_speed_human)
         self._set_stat("Avg", stats.avg_speed_human)
         self._set_stat("Failed", str(snap.shards_failed))
+        self._set_stat("Outstanding", stats.remaining_human)
 
         if self._slm_last_label is not None and self.status.slm_last_run:
             self._slm_last_label.configure(text=f"Last run: {self.status.slm_last_run}")
@@ -805,6 +813,19 @@ class ClusterCard(ctk.CTkFrame):
                 command=_copy_snap_name,
             ).pack(side="right")
 
+            repo_row = ctk.CTkFrame(self, fg_color="transparent")
+            repo_row.pack(fill="x", padx=18, pady=(0, 2))
+            repo_text = f"Repo: {snap.repository}" if snap.repository else "Repo: —"
+            if snap.indices_count > 0:
+                repo_text += f"   •   Indices: {snap.indices_count:,}"
+            self._repo_label = ctk.CTkLabel(
+                repo_row,
+                text=repo_text,
+                font=ctk.CTkFont(size=10),
+                text_color=("#666666", "#93a6bb"),
+            )
+            self._repo_label.pack(anchor="w")
+
             # Progress bar
             if stats:
                 prog_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -891,6 +912,12 @@ class ClusterCard(ctk.CTkFrame):
                     row += 1
 
                 self._stat_item(stats_frame, "Avg", stats.avg_speed_human, row, col)
+                col += 1
+                if col > 1:
+                    col = 0
+                    row += 1
+
+                self._stat_item(stats_frame, "Outstanding", stats.remaining_human, row, col)
                 col += 1
                 if col > 1:
                     col = 0

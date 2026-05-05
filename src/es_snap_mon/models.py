@@ -46,6 +46,7 @@ class SnapshotInfo:
     shards_total: int = 0
     shards_failed: int = 0
     shards_successful: int = 0
+    repository: Optional[str] = None
 
 
 @dataclass
@@ -179,6 +180,28 @@ class SnapshotStats:
             return _speed_to_human(self.max_speed_bps)
         if self.max_shard_rate > 0:
             return _shard_rate_to_human(self.max_shard_rate)
+        return "—"
+
+    @property
+    def remaining_bytes(self) -> int:
+        return max(0, self.total_bytes - self.processed_bytes)
+
+    @property
+    def remaining_files(self) -> int:
+        return max(0, self.total_files - self.processed_files)
+
+    @property
+    def remaining_shards(self) -> int:
+        return max(0, self.total_shards - self.processed_shards)
+
+    @property
+    def remaining_human(self) -> str:
+        if self.total_bytes > 0:
+            return _bytes_to_human(self.remaining_bytes)
+        if self.total_files > 0:
+            return f"{self.remaining_files:,} files"
+        if self.total_shards > 0:
+            return f"{self.remaining_shards} shards"
         return "—"
 
 
