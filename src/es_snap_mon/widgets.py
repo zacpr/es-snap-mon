@@ -10,6 +10,8 @@ import tkinter as tk
 import webbrowser
 
 import customtkinter as ctk
+import requests
+from requests.auth import HTTPBasicAuth
 
 from .models import ClusterStatus, SnapshotState
 
@@ -1025,8 +1027,29 @@ class AddClusterDialog:
         self.host_entry.pack(fill="x", padx=20, pady=(4, 0))
 
         ctk.CTkLabel(self.frame, text="Snapshot Repository", font=ctk.CTkFont(weight="bold")).pack(anchor="w", **pad)
-        self.repo_entry = ctk.CTkEntry(self.frame, placeholder_text="e.g. my-s3-repo")
+        # Editable dropdown: users can type, or fetch/select existing repos.
+        self.repo_entry = ctk.CTkComboBox(self.frame, values=[])
         self.repo_entry.pack(fill="x", padx=20, pady=(4, 0))
+        self.repo_entry.set("")
+
+        repo_btn_row = ctk.CTkFrame(self.frame, fg_color="transparent")
+        repo_btn_row.pack(fill="x", padx=20, pady=(6, 0))
+        ctk.CTkButton(
+            repo_btn_row,
+            text="Fetch Repositories",
+            width=140,
+            height=28,
+            fg_color="transparent",
+            border_width=1,
+            command=self._fetch_repos,
+        ).pack(side="left")
+        self.repo_status = ctk.CTkLabel(
+            repo_btn_row,
+            text="",
+            font=ctk.CTkFont(size=11),
+            text_color=("#666666", "#94a3b8"),
+        )
+        self.repo_status.pack(side="left", padx=(8, 0))
 
         ctk.CTkLabel(self.frame, text="SLM Policy Name", font=ctk.CTkFont(weight="bold")).pack(anchor="w", **pad)
         self.slm_entry = ctk.CTkEntry(self.frame, placeholder_text="e.g. daily-snapshot-policy")
@@ -1082,7 +1105,7 @@ class AddClusterDialog:
         cfg = self.existing.config
         self.name_entry.insert(0, cfg.name)
         self.host_entry.insert(0, cfg.host)
-        self.repo_entry.insert(0, cfg.snapshot_repo)
+        self.repo_entry.set(cfg.snapshot_repo)
         self.slm_entry.insert(0, cfg.slm_policy)
         self.user_entry.insert(0, cfg.username)
         self.ssl_var.set(1 if cfg.verify_ssl else 0)
@@ -1091,6 +1114,75 @@ class AddClusterDialog:
         pwd = get_password(cfg.name)
         if pwd:
             self.pass_entry.insert(0, pwd)
+
+    def _fetch_repos(self):
+        self.repo_status.configure(text="Fetching…", text_color="#3498db")
+        thread = threading.Thread(target=self._run_fetch_repos, daemon=True)
+        thread.start()
+
+    def _run_fetch_repos(self):
+        from .es_client import _resolve_verify
+        from .models import ClusterConfig
+
+        host = self.host_entry.get().strip()
+        user = self.user_entry.get().strip()
+        pwd = self.pass_entry.get()
+        if not host or not user:
+            self.dialog.after(
+                0,
+                lambda: self.repo_status.configure(
+                    text="Enter host + username first", text_color="#e74c3c"
+                ),
+            )
+            return
+
+        ca_cert = self.existing.config.ca_cert if self.existing else None
+        cfg = ClusterConfig(
+            name="repo-fetch",
+            host=host,
+            snapshot_repo="_",
+            slm_policy="_",
+            username=user,
+            verify_ssl=bool(self.ssl_var.get()),
+            ca_cert=ca_cert,
+        )
+
+        try:
+            session = requests.Session()
+            session.auth = HTTPBasicAuth(user, pwd)
+            session.verify = _resolve_verify(cfg)
+            resp = session.get(f"{host.rstrip('/')}/_snapshot", timeout=15)
+            if resp.status_code != 200:
+                try:
+                    err = resp.json().get("error", {})
+                    reason = err.get("reason") or (err.get("root_cause") or [{}])[0].get("reason")
+                except Exception:
+                    reason = None
+                msg = f"HTTP {resp.status_code}"
+                if reason:
+                    msg += f": {reason}"
+                self.dialog.after(0, lambda m=msg: self.repo_status.configure(text=m, text_color="#e74c3c"))
+                return
+
+            payload = resp.json() if resp.text else {}
+            repos = sorted(payload.keys()) if isinstance(payload, dict) else []
+            if not repos:
+                self.dialog.after(
+                    0,
+                    lambda: self.repo_status.configure(text="No repositories found", text_color="#f39c12"),
+                )
+                return
+
+            def apply_repos():
+                self.repo_entry.configure(values=repos)
+                current = self.repo_entry.get().strip()
+                if not current:
+                    self.repo_entry.set(repos[0])
+                self.repo_status.configure(text=f"Loaded {len(repos)} repo(s)", text_color="#2ecc71")
+
+            self.dialog.after(0, apply_repos)
+        except Exception as e:
+            self.dialog.after(0, lambda: self.repo_status.configure(text=str(e), text_color="#e74c3c"))
 
     def _test_connection(self):
         self.test_label.configure(text="Testing…", text_color="#3498db")
