@@ -525,7 +525,6 @@ class ClusterCard(ctk.CTkFrame):
         self._slm_last_label = None
         self._slm_next_label = None
         self._slm_running_label = None
-        self._extra_snap_label = None
         self._render_scenic_mode = scenic_mode
         self._render_frenzy_mode = frenzy_mode
         self._render_parallax_intensity = parallax_intensity
@@ -596,13 +595,6 @@ class ClusterCard(ctk.CTkFrame):
 
         if self._state_badge_label is not None:
             self._state_badge_label.configure(text=snap.state.value)
-
-        if self._extra_snap_label is not None:
-            extra = max(0, self.status.active_snapshot_count - 1)
-            if extra > 0:
-                self._extra_snap_label.configure(text=f"+{extra} more running")
-            else:
-                self._extra_snap_label.configure(text="")
 
         if self._name_widget is not None:
             try:
@@ -812,16 +804,6 @@ class ClusterCard(ctk.CTkFrame):
                 font=ctk.CTkFont(size=10),
                 command=_copy_snap_name,
             ).pack(side="right")
-
-            extra_running = max(0, self.status.active_snapshot_count - 1)
-            if extra_running > 0:
-                self._extra_snap_label = ctk.CTkLabel(
-                    snap_frame,
-                    text=f"+{extra_running} more running",
-                    font=ctk.CTkFont(size=10, weight="bold"),
-                    text_color="#f59e0b",
-                )
-                self._extra_snap_label.pack(side="right", padx=(0, 8))
 
             # Progress bar
             if stats:

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import threading
 import time
+from dataclasses import replace
 from typing import List
 
 import customtkinter as ctk
@@ -375,11 +376,21 @@ class App(ctk.CTk):
             self._empty_label.destroy()
             self._empty_label = None
 
-        seen: set[str] = set()
-        for i, status in enumerate(self.cluster_statuses):
+        rows: list[tuple[str, ClusterStatus, str]] = []
+        for status in self.cluster_statuses:
             name = status.config.name
-            seen.add(name)
-            history = self._speed_history.get(name, [])
+            if status.snapshot_jobs and len(status.snapshot_jobs) > 1:
+                for job in status.snapshot_jobs:
+                    row_key = f"{name}::{job.info.name}"
+                    row_status = replace(status, snapshot_info=job.info, snapshot_stats=job.stats)
+                    rows.append((row_key, row_status, name))
+            else:
+                rows.append((name, status, name))
+
+        seen: set[str] = set()
+        for i, (row_key, status, base_name) in enumerate(rows):
+            seen.add(row_key)
+            history = self._speed_history.get(base_name, [])
             fp = self._card_fingerprint(
                 status,
                 history,
@@ -387,7 +398,7 @@ class App(ctk.CTk):
                 all_active,
                 self._parallax_intensity,
             )
-            card = self._card_widgets.get(name)
+            card = self._card_widgets.get(row_key)
             if card is None:
                 card = ClusterCard(
                     self.scroll,
@@ -396,16 +407,16 @@ class App(ctk.CTk):
                     scenic_mode=self._scenic_mode,
                     frenzy_mode=all_active,
                     parallax_intensity=self._parallax_intensity,
-                    on_remove=lambda n=name: self._confirm_remove(n),
+                    on_remove=lambda n=base_name: self._confirm_remove(n),
                     on_edit=lambda s=status: self._open_edit_dialog(s),
                 )
-                self._card_widgets[name] = card
-                self._card_fingerprints[name] = fp
+                self._card_widgets[row_key] = card
+                self._card_fingerprints[row_key] = fp
             else:
                 # Keep callbacks bound to the latest status object
                 card.on_edit = lambda s=status: self._open_edit_dialog(s)
-                card.on_remove = lambda n=name: self._confirm_remove(n)
-                if self._card_fingerprints.get(name) != fp:
+                card.on_remove = lambda n=base_name: self._confirm_remove(n)
+                if self._card_fingerprints.get(row_key) != fp:
                     card.refresh(
                         status,
                         history,
@@ -413,7 +424,7 @@ class App(ctk.CTk):
                         frenzy_mode=all_active,
                         parallax_intensity=self._parallax_intensity,
                     )
-                    self._card_fingerprints[name] = fp
+                    self._card_fingerprints[row_key] = fp
             card.grid(row=i, column=0, sticky="ew", padx=8, pady=6)
 
         # Remove cards for clusters that no longer exist

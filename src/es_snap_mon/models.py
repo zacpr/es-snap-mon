@@ -183,6 +183,13 @@ class SnapshotStats:
 
 
 @dataclass
+class SnapshotJob:
+    """A single active snapshot job (used when multiple run concurrently)."""
+    info: SnapshotInfo
+    stats: Optional[SnapshotStats] = None
+
+
+@dataclass
 class ClusterStatus:
     """Aggregated status for display on the dashboard."""
     config: ClusterConfig
@@ -190,6 +197,7 @@ class ClusterStatus:
     error_message: Optional[str] = None
     snapshot_info: Optional[SnapshotInfo] = None
     snapshot_stats: Optional[SnapshotStats] = None
+    snapshot_jobs: list[SnapshotJob] = field(default_factory=list)
     active_snapshot_count: int = 0
     active_snapshot_names: list[str] = field(default_factory=list)
     slm_last_run: Optional[str] = None
