@@ -82,6 +82,31 @@ def fetch_cluster_status(config: ClusterConfig, password: str) -> ClusterStatus:
         snapshots = []
         config_repo_for_status = config.snapshot_repo
 
+        def _repo_error_message(r: requests.Response) -> str:
+            code = r.status_code
+            try:
+                payload = r.json()
+                err = payload.get("error") or {}
+                root = (err.get("root_cause") or [{}])[0]
+                err_type = root.get("type") or err.get("type") or ""
+                reason = root.get("reason") or err.get("reason") or ""
+            except Exception:
+                err_type = ""
+                reason = (r.text or "").strip().splitlines()[0][:180]
+
+            if code == 404 or "repository_missing_exception" in err_type:
+                return f"Snapshot repository '{config.snapshot_repo}' not found on cluster"
+            if code == 403:
+                return (
+                    f"Access denied for snapshot repository '{config.snapshot_repo}' "
+                    "(check Elasticsearch role permissions)"
+                )
+            if code >= 400:
+                if reason:
+                    return f"Snapshot repo '{config.snapshot_repo}' error (HTTP {code}): {reason}"
+                return f"Snapshot repo '{config.snapshot_repo}' error (HTTP {code})"
+            return ""
+
         resp = session.get(
             f"{base}/_snapshot/{config.snapshot_repo}/_current",
             timeout=15,
@@ -89,20 +114,8 @@ def fetch_cluster_status(config: ClusterConfig, password: str) -> ClusterStatus:
         if resp.status_code == 200:
             data = resp.json()
             snapshots = data.get("snapshots", []) or []
-
-        # Fallback: if configured repo has no current snapshot OR the repo call
-        # failed (e.g. wrong repo name), ask cluster-wide status across repos.
-        if not snapshots:
-            try:
-                all_resp = session.get(f"{base}/_snapshot/_status", timeout=20)
-                if all_resp.status_code == 200:
-                    snapshots = all_resp.json().get("snapshots", []) or []
-                    if snapshots:
-                        running_repo = snapshots[0].get("repository")
-                        if running_repo:
-                            config_repo_for_status = running_repo
-            except Exception:
-                pass
+        else:
+            status.error_message = _repo_error_message(resp)
 
         if snapshots:
             running = [s for s in snapshots if (s.get("state") or "").upper() in ("STARTED", "IN_PROGRESS")]
@@ -128,7 +141,7 @@ def fetch_cluster_status(config: ClusterConfig, password: str) -> ClusterStatus:
                             job.stats = _extract_stats(j_data[0])
                             job.info = _merge_shard_stats(job.info, j_data[0])
                 except Exception:
-                    # Best-effort only; keep whatever _current/_status-all gave us.
+                    # Best-effort only; keep whatever _current gave us.
                     pass
 
             snap = _select_snapshot(snapshots)
