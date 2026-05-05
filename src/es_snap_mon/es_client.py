@@ -121,6 +121,25 @@ def fetch_cluster_status(config: ClusterConfig, password: str) -> ClusterStatus:
                     SnapshotJob(info=_parse_snapshot(s), stats=_extract_stats(s))
                     for s in running
                 ]
+
+                # Try to enrich each running job with a direct _status call so
+                # concurrent snapshots have equally rich byte/file telemetry.
+                for job, raw in zip(status.snapshot_jobs, running):
+                    try:
+                        repo_for_job = raw.get("repository") or config.snapshot_repo
+                        j_resp = session.get(
+                            f"{base}/_snapshot/{repo_for_job}/{job.info.name}/_status",
+                            timeout=15,
+                        )
+                        if j_resp.status_code == 200:
+                            j_data = j_resp.json().get("snapshots", [])
+                            if j_data:
+                                job.stats = _extract_stats(j_data[0])
+                                job.info = _merge_shard_stats(job.info, j_data[0])
+                    except Exception:
+                        # Best-effort only; keep whatever _current/_status-all gave us.
+                        pass
+
                 snap = _select_snapshot(snapshots)
                 if snap is None:
                     snap = snapshots[0]
@@ -159,6 +178,15 @@ def fetch_cluster_status(config: ClusterConfig, password: str) -> ClusterStatus:
                                             break
                     except Exception:
                         pass  # Fall back to whatever _current gave us
+
+                # If the selected primary snapshot exists in the per-job list,
+                # use the per-job enriched values as the source of truth.
+                if status.snapshot_jobs and status.snapshot_info is not None:
+                    for job in status.snapshot_jobs:
+                        if job.info.name == status.snapshot_info.name:
+                            status.snapshot_info = job.info
+                            status.snapshot_stats = job.stats
+                            break
     except Exception as exc:
         status.error_message = f"Snapshot query failed: {exc}"
 

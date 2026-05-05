@@ -29,6 +29,12 @@ class App(ctk.CTk):
 
     REFRESH_INTERVAL = 15  # seconds
 
+    @staticmethod
+    def _job_key(cluster_name: str, snapshot_name: str | None) -> str:
+        if snapshot_name:
+            return f"{cluster_name}::{snapshot_name}"
+        return cluster_name
+
     def __init__(self):
         super().__init__()
         ctk.set_appearance_mode("dark")
@@ -277,55 +283,69 @@ class App(ctk.CTk):
 
     def _on_refresh_done(self, results: List[ClusterStatus]):
         now = time.time()
-        for st in results:
-            if st.snapshot_stats is None:
-                continue
-            name = st.config.name
-            bytes_now = st.snapshot_stats.processed_bytes
-            shards_now = st.snapshot_stats.processed_shards
+
+        def _update_rate_windows(key: str, stats) -> None:
+            bytes_now = stats.processed_bytes
+            shards_now = stats.processed_shards
             current_bps = 0.0
             current_sps = 0.0
-            if name in self._last_poll:
-                t_prev, bytes_prev, shards_prev = self._last_poll[name]
+            if key in self._last_poll:
+                t_prev, bytes_prev, shards_prev = self._last_poll[key]
                 dt = now - t_prev
                 if dt > 0:
                     if bytes_now > bytes_prev:
                         current_bps = (bytes_now - bytes_prev) / dt
-                        st.snapshot_stats.current_speed_bps = current_bps
+                        stats.current_speed_bps = current_bps
                     if shards_now > shards_prev:
                         current_sps = (shards_now - shards_prev) / dt
-                        st.snapshot_stats.current_shard_rate = current_sps
-            self._last_poll[name] = (now, bytes_now, shards_now)
+                        stats.current_shard_rate = current_sps
+            self._last_poll[key] = (now, bytes_now, shards_now)
 
             # Update rolling speed history (keep last 10 min)
-            history = self._speed_history.get(name, [])
-            # On first poll we don't have a current_bps yet, so seed with avg_speed_bps
-            speed_to_store = current_bps if current_bps > 0 else st.snapshot_stats.avg_speed_bps
+            history = self._speed_history.get(key, [])
+            speed_to_store = current_bps if current_bps > 0 else stats.avg_speed_bps
             if speed_to_store > 0:
                 history.append((now, speed_to_store))
-            # Prune old samples (> 10 min)
             history = [(t, s) for t, s in history if now - t < 600]
-            self._speed_history[name] = history
+            self._speed_history[key] = history
 
             if history:
                 speeds = [s for _, s in history]
-                st.snapshot_stats.window_avg_speed_bps = sum(speeds) / len(speeds)
-                st.snapshot_stats.min_speed_bps = min(speeds)
-                st.snapshot_stats.max_speed_bps = max(speeds)
+                stats.window_avg_speed_bps = sum(speeds) / len(speeds)
+                stats.min_speed_bps = min(speeds)
+                stats.max_speed_bps = max(speeds)
 
             # Shard-rate history (used when byte stats aren't available)
-            sr_history = self._shard_rate_history.get(name, [])
-            sr_to_store = current_sps if current_sps > 0 else st.snapshot_stats.avg_shard_rate
+            sr_history = self._shard_rate_history.get(key, [])
+            sr_to_store = current_sps if current_sps > 0 else stats.avg_shard_rate
             if sr_to_store > 0:
                 sr_history.append((now, sr_to_store))
             sr_history = [(t, s) for t, s in sr_history if now - t < 600]
-            self._shard_rate_history[name] = sr_history
+            self._shard_rate_history[key] = sr_history
 
             if sr_history:
                 rates = [s for _, s in sr_history]
-                st.snapshot_stats.window_avg_shard_rate = sum(rates) / len(rates)
-                st.snapshot_stats.min_shard_rate = min(rates)
-                st.snapshot_stats.max_shard_rate = max(rates)
+                stats.window_avg_shard_rate = sum(rates) / len(rates)
+                stats.min_shard_rate = min(rates)
+                stats.max_shard_rate = max(rates)
+
+        for st in results:
+            if st.snapshot_jobs:
+                for job in st.snapshot_jobs:
+                    if job.stats is None:
+                        continue
+                    k = self._job_key(st.config.name, job.info.name)
+                    _update_rate_windows(k, job.stats)
+                # Keep primary stats in sync with the corresponding job stats
+                # so non-split render paths stay consistent.
+                if st.snapshot_info is not None and st.snapshot_stats is not None:
+                    for job in st.snapshot_jobs:
+                        if job.info.name == st.snapshot_info.name and job.stats is not None:
+                            st.snapshot_stats = job.stats
+                            break
+            elif st.snapshot_stats is not None:
+                k = self._job_key(st.config.name, st.snapshot_info.name if st.snapshot_info else None)
+                _update_rate_windows(k, st.snapshot_stats)
 
         self.cluster_statuses = results
         self._refreshing = False
@@ -376,21 +396,22 @@ class App(ctk.CTk):
             self._empty_label.destroy()
             self._empty_label = None
 
-        rows: list[tuple[str, ClusterStatus, str]] = []
+        rows: list[tuple[str, ClusterStatus, str, str]] = []
         for status in self.cluster_statuses:
             name = status.config.name
             if status.snapshot_jobs and len(status.snapshot_jobs) > 1:
                 for job in status.snapshot_jobs:
                     row_key = f"{name}::{job.info.name}"
                     row_status = replace(status, snapshot_info=job.info, snapshot_stats=job.stats)
-                    rows.append((row_key, row_status, name))
+                    rows.append((row_key, row_status, name, row_key))
             else:
-                rows.append((name, status, name))
+                hist_key = self._job_key(name, status.snapshot_info.name if status.snapshot_info else None)
+                rows.append((name, status, name, hist_key))
 
         seen: set[str] = set()
-        for i, (row_key, status, base_name) in enumerate(rows):
+        for i, (row_key, status, base_name, hist_key) in enumerate(rows):
             seen.add(row_key)
-            history = self._speed_history.get(base_name, [])
+            history = self._speed_history.get(hist_key, [])
             fp = self._card_fingerprint(
                 status,
                 history,
