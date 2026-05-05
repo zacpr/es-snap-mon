@@ -442,6 +442,8 @@ class App(ctk.CTk):
             s.shards_successful if s else None,
             s.shards_total if s else None,
             s.shards_failed if s else None,
+            status.active_snapshot_count,
+            tuple(status.active_snapshot_names[:4]),
             round(st.progress_pct, 2) if st else None,
             st.processed_files if st else None,
             st.total_files if st else None,

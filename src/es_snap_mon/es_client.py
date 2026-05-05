@@ -113,6 +113,9 @@ def fetch_cluster_status(config: ClusterConfig, password: str) -> ClusterStatus:
                 config_repo_for_status = config.snapshot_repo
 
             if snapshots:
+                running = [s for s in snapshots if (s.get("state") or "").upper() in ("STARTED", "IN_PROGRESS")]
+                status.active_snapshot_count = len(running)
+                status.active_snapshot_names = [s.get("snapshot", "unknown") for s in running]
                 snap = _select_snapshot(snapshots)
                 if snap is None:
                     snap = snapshots[0]

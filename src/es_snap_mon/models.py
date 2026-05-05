@@ -190,6 +190,8 @@ class ClusterStatus:
     error_message: Optional[str] = None
     snapshot_info: Optional[SnapshotInfo] = None
     snapshot_stats: Optional[SnapshotStats] = None
+    active_snapshot_count: int = 0
+    active_snapshot_names: list[str] = field(default_factory=list)
     slm_last_run: Optional[str] = None
     slm_next_run: Optional[str] = None
     slm_in_progress: bool = False
