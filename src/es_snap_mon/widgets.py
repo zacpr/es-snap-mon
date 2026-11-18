@@ -10,8 +10,6 @@ import tkinter as tk
 import webbrowser
 
 import customtkinter as ctk
-import requests
-from requests.auth import HTTPBasicAuth
 
 from .models import ClusterStatus, SnapshotState
 
@@ -1026,6 +1024,10 @@ class AddClusterDialog:
         self.host_entry = ctk.CTkEntry(self.frame, placeholder_text="https://elastic.example.com:9200")
         self.host_entry.pack(fill="x", padx=20, pady=(4, 0))
 
+        ctk.CTkLabel(self.frame, text="SSH Jump Host (optional)", font=ctk.CTkFont(weight="bold")).pack(anchor="w", **pad)
+        self.ssh_jump_entry = ctk.CTkEntry(self.frame, placeholder_text="Blank = global setting; '-' = direct")
+        self.ssh_jump_entry.pack(fill="x", padx=20, pady=(4, 0))
+
         ctk.CTkLabel(self.frame, text="Snapshot Repository", font=ctk.CTkFont(weight="bold")).pack(anchor="w", **pad)
         # Editable dropdown: users can type, or fetch/select existing repos.
         self.repo_entry = ctk.CTkComboBox(self.frame, values=[])
@@ -1105,6 +1107,7 @@ class AddClusterDialog:
         cfg = self.existing.config
         self.name_entry.insert(0, cfg.name)
         self.host_entry.insert(0, cfg.host)
+        self.ssh_jump_entry.insert(0, "-" if cfg.ssh_jump_host == "" else cfg.ssh_jump_host or "")
         self.repo_entry.set(cfg.snapshot_repo)
         self.slm_entry.insert(0, cfg.slm_policy)
         self.user_entry.insert(0, cfg.username)
@@ -1115,14 +1118,23 @@ class AddClusterDialog:
         if pwd:
             self.pass_entry.insert(0, pwd)
 
+    def _selected_jump_host(self):
+        from .config_manager import get_ssh_jump_host
+
+        value = self.ssh_jump_entry.get().strip()
+        if value == "-":
+            return None
+        return value or get_ssh_jump_host() or None
+
     def _fetch_repos(self):
         self.repo_status.configure(text="Fetching…", text_color="#3498db")
         thread = threading.Thread(target=self._run_fetch_repos, daemon=True)
         thread.start()
 
     def _run_fetch_repos(self):
-        from .es_client import _resolve_verify
+        from .es_client import create_api_session
         from .models import ClusterConfig
+        from .config_manager import get_ssh_jump_host
 
         host = self.host_entry.get().strip()
         user = self.user_entry.get().strip()
@@ -1148,9 +1160,7 @@ class AddClusterDialog:
         )
 
         try:
-            session = requests.Session()
-            session.auth = HTTPBasicAuth(user, pwd)
-            session.verify = _resolve_verify(cfg)
+            session = create_api_session(cfg, pwd, self._selected_jump_host())
             resp = session.get(f"{host.rstrip('/')}/_snapshot", timeout=15)
             if resp.status_code != 200:
                 try:
@@ -1192,6 +1202,7 @@ class AddClusterDialog:
     def _run_test(self):
         from .es_client import fetch_cluster_status
         from .models import ClusterConfig
+        from .config_manager import get_ssh_jump_host
 
         ca_cert = self.existing.config.ca_cert if self.existing else None
         cfg = ClusterConfig(
@@ -1204,7 +1215,7 @@ class AddClusterDialog:
             ca_cert=ca_cert,
         )
         pwd = self.pass_entry.get()
-        result = fetch_cluster_status(cfg, pwd)
+        result = fetch_cluster_status(cfg, pwd, ssh_jump_host=self._selected_jump_host())
 
         def update():
             if result.reachable:
@@ -1243,6 +1254,10 @@ class AddClusterDialog:
             username=user,
             verify_ssl=bool(self.ssl_var.get()),
             ca_cert=ca_cert,
+            ssh_jump_host=(
+                "" if self.ssh_jump_entry.get().strip() == "-"
+                else self.ssh_jump_entry.get().strip() or None
+            ),
         )
         try:
             save_cluster(cfg, pwd)
@@ -1254,6 +1269,48 @@ class AddClusterDialog:
             self.on_save()
         finally:
             self.dialog.after(250, self.dialog.destroy)
+
+
+class SSHSettingsDialog:
+    def __init__(self, master, on_save=None):
+        from .config_manager import get_ssh_jump_host, set_ssh_jump_host
+
+        self.on_save = on_save
+        self.dialog = tk.Toplevel(master)
+        self.dialog.title("SSH Jump Settings")
+        self.dialog.geometry("500x235")
+        self.dialog.transient(master)
+        self.dialog.configure(bg="#2b2b2b")
+        frame = ctk.CTkFrame(self.dialog, corner_radius=0)
+        frame.pack(fill="both", expand=True)
+        ctk.CTkLabel(frame, text="SSH jump host", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=20, pady=(20, 0))
+        self.host_entry = ctk.CTkEntry(frame, placeholder_text="user@jump.example[:port] or SSH config alias")
+        self.host_entry.pack(fill="x", padx=20, pady=(4, 0))
+        self.host_entry.insert(0, get_ssh_jump_host())
+        ctk.CTkLabel(
+            frame,
+            text="Uses your OpenSSH config and agent. Leave blank for direct connections.\nElasticsearch and Kibana hostnames stay unchanged; remote DNS is used.",
+            font=ctk.CTkFont(size=11),
+            text_color="#94a3b8",
+            justify="left",
+        ).pack(anchor="w", padx=20, pady=(10, 0))
+        self.status = ctk.CTkLabel(frame, text="", font=ctk.CTkFont(size=11))
+        self.status.pack(anchor="w", padx=20, pady=(8, 0))
+        buttons = ctk.CTkFrame(frame, fg_color="transparent")
+        buttons.pack(fill="x", padx=20, pady=15)
+
+        def save():
+            try:
+                set_ssh_jump_host(self.host_entry.get())
+                if self.on_save:
+                    self.on_save()
+                self.dialog.destroy()
+            except Exception as exc:
+                self.status.configure(text=f"Save failed: {exc}", text_color="#e74c3c")
+
+        ctk.CTkButton(buttons, text="Cancel", fg_color="#555555", command=self.dialog.destroy).pack(side="right", padx=(8, 0))
+        ctk.CTkButton(buttons, text="Save", command=save).pack(side="right")
+        self.dialog.grab_set()
 
 
 class AISettingsDialog:

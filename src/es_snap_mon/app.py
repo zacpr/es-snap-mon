@@ -8,10 +8,17 @@ from typing import List
 
 import customtkinter as ctk
 
-from .config_manager import load_clusters, remove_cluster, get_password, load_presets, toggle_ssl_verify
+from .config_manager import (
+    get_ssh_jump_host,
+    load_clusters,
+    remove_cluster,
+    get_password,
+    load_presets,
+    toggle_ssl_verify,
+)
 from .es_client import fetch_cluster_status, fetch_diagnostics
 from .models import ClusterStatus, SnapshotState
-from .widgets import ClusterCard, AddClusterDialog, AISettingsDialog, AnalysisDialog, AnalysisScopeDialog
+from .widgets import ClusterCard, AddClusterDialog, AISettingsDialog, AnalysisDialog, AnalysisScopeDialog, SSHSettingsDialog
 
 
 def _icon_path() -> str | None:
@@ -150,6 +157,16 @@ class App(ctk.CTk):
         )
         self.ai_settings_btn.grid(row=8, column=0, padx=20, pady=(0, 10), sticky="ew")
 
+        self.ssh_settings_btn = ctk.CTkButton(
+            self.sidebar,
+            text="SSH Jump Settings",
+            fg_color="transparent",
+            border_width=1,
+            text_color=("#666", "#94a3b8"),
+            command=lambda: SSHSettingsDialog(self, self._trigger_refresh),
+        )
+        self.ssh_settings_btn.grid(row=9, column=0, padx=20, pady=(0, 10), sticky="ew")
+
         self.auto_var = ctk.BooleanVar(value=True)
         ctk.CTkSwitch(
             self.sidebar,
@@ -270,13 +287,15 @@ class App(ctk.CTk):
 
     def _fetch_all(self):
         configs = load_clusters()
+        ssh_jump_host = get_ssh_jump_host() or None
         results = []
         for cfg in configs:
+            cluster_jump = cfg.ssh_jump_host if cfg.ssh_jump_host is not None else ssh_jump_host
             pwd = get_password(cfg.name)
             if not pwd:
                 st = ClusterStatus(config=cfg, reachable=False, error_message="No password stored")
             else:
-                st = fetch_cluster_status(cfg, pwd)
+                st = fetch_cluster_status(cfg, pwd, ssh_jump_host=cluster_jump or None)
             results.append(st)
 
         self.after(0, lambda: _safe_call(self._on_refresh_done, results))
@@ -555,7 +574,16 @@ class App(ctk.CTk):
                 return
             pwd = get_password(status.config.name) or ""
             try:
-                diag = fetch_diagnostics(status.config, pwd, sections=selected_sections)
+                diag = fetch_diagnostics(
+                    status.config,
+                    pwd,
+                    sections=selected_sections,
+                    ssh_jump_host=(
+                        status.config.ssh_jump_host
+                        if status.config.ssh_jump_host is not None
+                        else get_ssh_jump_host() or None
+                    ),
+                )
             except Exception as e:
                 print(f"[es-snap-mon] diagnostics error for {status.config.name}: {e}", file=sys.stderr)
                 traceback.print_exc()

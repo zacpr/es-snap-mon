@@ -1,11 +1,11 @@
 [project]
 name = "es-snap-mon"
-version = "0.1.0"
+version = "0.4.10"
 description = "A sleek GUI for monitoring Elasticsearch snapshots"
 requires-python = ">=3.9"
 dependencies = [
     "customtkinter>=5.2.0",
-    "requests>=2.31.0",
+    "requests[socks]>=2.31.0",
     "keyring>=24.0.0",
 ]
 

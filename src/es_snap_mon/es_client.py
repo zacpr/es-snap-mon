@@ -18,6 +18,21 @@ from .models import (
     SnapshotState,
     SnapshotStats,
 )
+from .ssh_tunnel import configure_tunnel
+
+
+def create_api_session(
+    config: ClusterConfig,
+    password: str,
+    ssh_jump_host: str | None = None,
+) -> requests.Session:
+    session = requests.Session()
+    session.auth = HTTPBasicAuth(config.username, password)
+    session.verify = _resolve_verify(config)
+    proxy = configure_tunnel(ssh_jump_host)
+    if proxy:
+        session.proxies = {"http": proxy, "https": proxy}
+    return session
 
 
 def _resolve_verify(config: ClusterConfig):
@@ -51,12 +66,18 @@ def _bundled_ca_path() -> Optional[Path]:
     return Path(__file__).parent / "data" / "ca.pem"
 
 
-def fetch_cluster_status(config: ClusterConfig, password: str) -> ClusterStatus:
+def fetch_cluster_status(
+    config: ClusterConfig,
+    password: str,
+    ssh_jump_host: str | None = None,
+) -> ClusterStatus:
     """Fetch full status for a single cluster."""
     status = ClusterStatus(config=config)
-    session = requests.Session()
-    session.auth = HTTPBasicAuth(config.username, password)
-    session.verify = _resolve_verify(config)
+    try:
+        session = create_api_session(config, password, ssh_jump_host)
+    except Exception as exc:
+        status.error_message = f"SSH tunnel error: {exc}"
+        return status
     base = config.host.rstrip("/")
 
     # 1. Health check
@@ -378,7 +399,12 @@ def _format_es_time(value: Union[str, int, None]) -> Optional[str]:
         return str(value)
 
 
-def fetch_diagnostics(config: ClusterConfig, password: str, sections: set[str] | None = None) -> dict:
+def fetch_diagnostics(
+    config: ClusterConfig,
+    password: str,
+    sections: set[str] | None = None,
+    ssh_jump_host: str | None = None,
+) -> dict:
     """Collect compact cluster + node stats useful for performance diagnosis.
 
     `sections` filters which sub-sections to include. Recognized keys:
@@ -389,9 +415,7 @@ def fetch_diagnostics(config: ClusterConfig, password: str, sections: set[str] |
         "health", "pending_tasks", "nodes", "repository", "recoveries", "shards",
     }
     out: dict = {"host": config.host, "name": config.name}
-    session = requests.Session()
-    session.auth = HTTPBasicAuth(config.username, password)
-    session.verify = _resolve_verify(config)
+    session = create_api_session(config, password, ssh_jump_host)
     base = config.host.rstrip("/")
 
     def _get(path: str, timeout: int = 15):

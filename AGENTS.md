@@ -45,7 +45,12 @@ Until a stack is chosen, no directory structure exists. A typical layout once de
 
 ## Build and Test Commands
 
-**Not applicable yet.** Once a stack is selected, add the standard commands here (e.g., `pip install -e .`, `npm run build`, `cargo test`).
+```bash
+PYTHONPATH=src python -m pytest -q
+PYTHONPATH=src python -m compileall -q src
+```
+
+The app requires Python 3.9+, OpenSSH, and the dependencies in `pyproject.toml`. Run it with `PYTHONPATH=src python -m es_snap_mon` or install it with `pip install -e .`.
 
 ## Code Style Guidelines
 

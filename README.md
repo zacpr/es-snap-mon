@@ -37,6 +37,14 @@ python -m es_snap_mon
 2. Enter credentials — passwords are stored securely in your OS keyring.
 3. Watch the dashboard update with live snapshot progress.
 
+### SSH jump host
+
+Choose **SSH Jump Settings** and enter an OpenSSH destination such as `dante@10.2.0.31`, `dante@jump.example:2222`, or an alias from `~/.ssh/config`. Leave it blank for direct connections.
+
+Drastic Smurf starts dynamic SOCKS tunnels and uses them for Elasticsearch monitoring, repository discovery, diagnostics, and Kibana-compatible API requests. Cluster URLs remain unchanged, including HTTPS hostnames and certificate verification. DNS is resolved through the selected SSH host. Authentication uses your existing OpenSSH keys, agent, and `ProxyJump` rules; interactive password prompts are not supported.
+
+Each cluster can override the global destination in its **Edit Cluster** dialog. Enter an SSH destination to route only that cluster through SSH, leave the field blank to inherit the global setting, or enter `-` to force a direct connection. Different SSH destinations can remain connected at the same time. For node-local services, use the node itself as the SSH destination (for example `10.2.60.11`) and a loopback service URL such as `http://127.0.0.1:5601`.
+
 ## Development
 
 ```bash

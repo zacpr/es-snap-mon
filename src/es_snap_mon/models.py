@@ -32,6 +32,7 @@ class ClusterConfig:
     # to validate the cluster's TLS certificate against a custom CA.
     # Special value "bundled" means "use the CA shipped inside this package".
     ca_cert: Optional[str] = None
+    ssh_jump_host: Optional[str] = None
 
 
 @dataclass

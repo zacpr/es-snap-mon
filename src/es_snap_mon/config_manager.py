@@ -61,6 +61,27 @@ def _config_path() -> Path:
     return _config_dir() / _CONFIG_FILE
 
 
+def get_ssh_jump_host() -> str:
+    try:
+        with open(_config_dir() / "settings.json", "r", encoding="utf-8") as f:
+            return str(json.load(f).get("ssh_jump_host", "")).strip()
+    except (OSError, json.JSONDecodeError, AttributeError):
+        return ""
+
+
+def set_ssh_jump_host(jump_host: str) -> None:
+    path = _config_dir() / "settings.json"
+    settings = {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            settings = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        pass
+    settings["ssh_jump_host"] = jump_host.strip()
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(settings, f, indent=2)
+
+
 def _password_key(cluster_name: str) -> str:
     return f"{_APP_NAME}_cluster_{cluster_name}"
 
@@ -88,6 +109,7 @@ def load_clusters() -> List[ClusterConfig]:
                     username=item["username"],
                     verify_ssl=bool(item.get("verify_ssl", True)),
                     ca_cert=item.get("ca_cert"),
+                    ssh_jump_host=item.get("ssh_jump_host"),
                 )
             )
         except KeyError:
@@ -106,6 +128,7 @@ def save_clusters(clusters: List[ClusterConfig]) -> None:
             "username": c.username,
             "verify_ssl": bool(c.verify_ssl),
             "ca_cert": c.ca_cert,
+            "ssh_jump_host": c.ssh_jump_host,
         }
         for c in clusters
     ]
