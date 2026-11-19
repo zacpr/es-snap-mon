@@ -1,6 +1,6 @@
 [project]
 name = "es-snap-mon"
-version = "0.4.10"
+version = "0.4.11"
 description = "A sleek GUI for monitoring Elasticsearch snapshots"
 requires-python = ">=3.9"
 dependencies = [

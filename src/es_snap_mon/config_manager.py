@@ -82,6 +82,42 @@ def set_ssh_jump_host(jump_host: str) -> None:
         json.dump(settings, f, indent=2)
 
 
+def get_ece_settings() -> dict:
+    try:
+        with open(_config_dir() / "settings.json", "r", encoding="utf-8") as f:
+            return dict(json.load(f).get("ece") or {})
+    except (OSError, json.JSONDecodeError, TypeError):
+        return {}
+
+
+def save_ece_settings(url: str, username: str, verify_ssl: bool, ssh_jump_host: str) -> None:
+    path = _config_dir() / "settings.json"
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            settings = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        settings = {}
+    settings["ece"] = {
+        "url": url.strip(),
+        "username": username.strip(),
+        "verify_ssl": verify_ssl,
+        "ssh_jump_host": ssh_jump_host.strip(),
+    }
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(settings, f, indent=2)
+
+
+def get_ece_password() -> str | None:
+    try:
+        return keyring.get_password(_APP_NAME, "ece_admin")
+    except Exception:
+        return None
+
+
+def set_ece_password(password: str) -> None:
+    keyring.set_password(_APP_NAME, "ece_admin", password)
+
+
 def _password_key(cluster_name: str) -> str:
     return f"{_APP_NAME}_cluster_{cluster_name}"
 

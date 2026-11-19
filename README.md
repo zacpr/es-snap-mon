@@ -45,6 +45,12 @@ Drastic Smurf starts dynamic SOCKS tunnels and uses them for Elasticsearch monit
 
 Each cluster can override the global destination in its **Edit Cluster** dialog. Enter an SSH destination to route only that cluster through SSH, leave the field blank to inherit the global setting, or enter `-` to force a direct connection. Different SSH destinations can remain connected at the same time. For node-local services, use the node itself as the SSH destination (for example `10.2.60.11`) and a loopback service URL such as `http://127.0.0.1:5601`.
 
+### ECE deployments
+
+Choose **ECE Deployments** to open the separate Elastic Cloud Enterprise deployment browser. Enter the ECE coordinator URL (typically port `12443`), an ECE username and password, and an optional SSH destination. The password is stored in the OS keyring.
+
+The browser authenticates with the ECE GUI login endpoint and uses its bearer token for `/api/v1/deployments`. It supports both current and older ECE response formats, retrieving deployment details when needed. The summary includes deployment health, Elasticsearch versions, running instance counts, memory, storage capacity, and memory pressure. Each Elasticsearch instance lists its health, running state, roles, memory, storage, and pressure. SSH destinations use the same OpenSSH configuration and `ProxyJump` support as cluster monitoring.
+
 ## Development
 
 ```bash

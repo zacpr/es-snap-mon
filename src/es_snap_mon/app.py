@@ -17,6 +17,7 @@ from .config_manager import (
     toggle_ssl_verify,
 )
 from .es_client import fetch_cluster_status, fetch_diagnostics
+from .ece_widgets import EceDeploymentsDialog
 from .models import ClusterStatus, SnapshotState
 from .widgets import ClusterCard, AddClusterDialog, AISettingsDialog, AnalysisDialog, AnalysisScopeDialog, SSHSettingsDialog
 
@@ -166,6 +167,15 @@ class App(ctk.CTk):
             command=lambda: SSHSettingsDialog(self, self._trigger_refresh),
         )
         self.ssh_settings_btn.grid(row=9, column=0, padx=20, pady=(0, 10), sticky="ew")
+
+        self.ece_btn = ctk.CTkButton(
+            self.sidebar,
+            text="ECE Deployments",
+            fg_color="#0f766e",
+            hover_color="#115e59",
+            command=lambda: EceDeploymentsDialog(self),
+        )
+        self.ece_btn.grid(row=10, column=0, padx=20, pady=(0, 10), sticky="ew")
 
         self.auto_var = ctk.BooleanVar(value=True)
         ctk.CTkSwitch(
